@@ -1,0 +1,26 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+.venv/
+
+# Arduino IDE
+*.hex
+*.elf
+*.bin
+
+# Build and IDE files
+build/
+out/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
