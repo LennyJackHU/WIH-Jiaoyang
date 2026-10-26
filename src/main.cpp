@@ -14,6 +14,7 @@ static uint32_t lastDrawMs = 0;
 static uint32_t partialCount = 0;
 static bool epdReady = false;        // displayInit() done since boot
 static bool forceFullRefresh = false; // first draw after deep-sleep wake
+static bool ignoreButtonsUntilRelease = false; // swallow the wake-up press
 
 static void fillState(PersistState& s) {
     s.magic = STATE_MAGIC;
@@ -69,8 +70,8 @@ static void saveAll() {
 }
 
 static bool wakePinsIdle() {
-    // buttons are active-high: idle means LOW
-    return digitalRead(PIN_BTN_A) == LOW && digitalRead(PIN_BTN_B) == LOW;
+    // buttons are active-low: idle means HIGH
+    return digitalRead(PIN_BTN_A) == HIGH && digitalRead(PIN_BTN_B) == HIGH;
 }
 
 static void goToSleep() {
@@ -92,18 +93,18 @@ static void goToSleep() {
     // Wake on buttons only. The encoder is not a wake source: its line can
     // sit at an arbitrary level mid-detent and cause instant re-wakes.
     const uint64_t wakeMask = (1ULL << PIN_BTN_A) | (1ULL << PIN_BTN_B);
-    esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_HIGH);
-    // Route wake pins to the RTC domain with explicit pull-downs (done
+    esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_LOW);
+    // Route wake pins to the RTC domain with explicit pull-ups (done
     // after esp_sleep_enable_ext1_wakeup, which reconfigures wake pins).
     const gpio_num_t wakePins[] = {(gpio_num_t)PIN_BTN_A, (gpio_num_t)PIN_BTN_B};
     for (gpio_num_t pin : wakePins) {
         rtc_gpio_init(pin);
         rtc_gpio_set_direction(pin, RTC_GPIO_MODE_INPUT_ONLY);
-        rtc_gpio_pullup_dis(pin);
-        rtc_gpio_pulldown_en(pin);
+        rtc_gpio_pullup_en(pin);
+        rtc_gpio_pulldown_dis(pin);
     }
     Serial.flush();
-    delay(20); // let RTC pull-downs settle before the power-domain switch
+    delay(20); // let RTC pull-ups settle before the power-domain switch
     esp_deep_sleep_start();
 }
 
@@ -130,6 +131,7 @@ void setup() {
         // Skip display init and redraw entirely.
         Serial.printf("wake from deep sleep, word=%s\n", picker.currentWord());
         forceFullRefresh = true;
+        ignoreButtonsUntilRelease = true; // the press that woke us is not an action
     } else if (!wokeFromSleep && storageLoadNvs(s) && applyState(s)) {
         // Power-cycle / reset: restore and repaint once (full refresh).
         Serial.printf("restored from NVS, word=%s\n", picker.currentWord());
@@ -171,6 +173,11 @@ void loop() {
         lastActivityMs = now;
     }
 
+    if (ignoreButtonsUntilRelease) {
+        if (digitalRead(PIN_BTN_A) == HIGH && digitalRead(PIN_BTN_B) == HIGH) {
+            ignoreButtonsUntilRelease = false;
+        }
+    } else {
     switch (inputPollButtons()) {
     case BtnEvent::CONFIRM:
         Serial.println("button A confirmed");
@@ -188,6 +195,7 @@ void loop() {
         break;
     default:
         break;
+    }
     }
 
     if (dirty && now - lastDrawMs >= DISPLAY_THROTTLE_MS) {

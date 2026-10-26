@@ -13,7 +13,7 @@
 #define PIN_ENC_B 6   // DT
 #define PIN_ENC_SW 4  // push switch, reserved (currently unused)
 
-// ---- Buttons (active high, internal pull-down) ----
+// ---- Buttons (active low, internal pull-up; wire between GPIO and GND) ----
 #define PIN_BTN_A 7   // confirm
 #define PIN_BTN_B 8   // refresh / cancel
 

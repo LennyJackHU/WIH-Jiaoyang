@@ -27,7 +27,7 @@
 
 顺时针 = 回退历史词，逆时针 = 滚动新词（若手感仍相反，交换 `src/main.cpp` 中 `stepForward`/`stepBackward` 两调用即可）。若步进感觉成倍增减，调整 `src/input.cpp` 中 `ENC_COUNTS_PER_STEP`。
 
-## 按钮（两脚接 GPIO 与 3V3，高电平有效）
+## 按钮（两脚接 GPIO 与 GND，低电平有效）
 
 | 按钮 | DevKitC-1 | GPIO | 功能 |
 |---|---|---|---|

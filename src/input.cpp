@@ -10,12 +10,12 @@ static int stepRemainder = 0;
 
 struct DebouncedButton {
     uint8_t pin;
-    bool stable;      // pull-down: released reads LOW
+    bool stable;      // pull-up: released reads HIGH
     bool lastReading;
     uint32_t lastChangeMs;
 
     explicit DebouncedButton(uint8_t p)
-        : pin(p), stable(false), lastReading(false), lastChangeMs(0) {}
+        : pin(p), stable(true), lastReading(true), lastChangeMs(0) {}
 };
 
 static DebouncedButton btnA{PIN_BTN_A};
@@ -26,8 +26,8 @@ void inputInit() {
     encoder.attachFullQuad(PIN_ENC_A, PIN_ENC_B);
     encoder.setFilter(1023);
     encoder.clearCount();
-    pinMode(PIN_BTN_A, INPUT_PULLDOWN);
-    pinMode(PIN_BTN_B, INPUT_PULLDOWN);
+    pinMode(PIN_BTN_A, INPUT_PULLUP);
+    pinMode(PIN_BTN_B, INPUT_PULLUP);
 }
 
 int inputReadEncoderSteps() {
@@ -50,7 +50,7 @@ static bool pressed(DebouncedButton& b) {
     }
     if (reading != b.stable && millis() - b.lastChangeMs >= BTN_DEBOUNCE_MS) {
         b.stable = reading;
-        if (b.stable) return true; // stable HIGH = pressed
+        if (!b.stable) return true; // stable LOW = pressed
     }
     return false;
 }
