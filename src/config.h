@@ -13,13 +13,20 @@
 #define PIN_ENC_B 6   // DT
 #define PIN_ENC_SW 4  // push switch, reserved (currently unused)
 
-// ---- Buttons (active low, internal pull-up) ----
+// ---- Buttons (active high, internal pull-down) ----
 #define PIN_BTN_A 7   // confirm
 #define PIN_BTN_B 8   // refresh / cancel
+
+// ---- Onboard RGB LED ----
+#define PIN_RGB_LED 38
 
 // ---- Behaviour ----
 #define DISPLAY_THROTTLE_MS   400   // min interval between screen updates
 #define FULL_REFRESH_EVERY    20    // full refresh after N partial updates
-#define SLEEP_TIMEOUT_MS      60000 // idle time before deep sleep
+#define SLEEP_IDLE_MS         400   // no input and screen clean -> deep sleep
 #define BTN_DEBOUNCE_MS       30
 #define HISTORY_LEN           32    // ring size of recent word history
+
+// Test switch: 1 = ignore saved state on boot, always start with fresh
+// random words (verifies RNG + word list). Set to 0 for normal behavior.
+#define FRESH_RANDOM_ON_BOOT  0

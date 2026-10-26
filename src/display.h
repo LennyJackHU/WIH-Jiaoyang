@@ -7,11 +7,16 @@
 // Full 200x200 frame buffer = 5000 bytes RAM, no paging needed.
 extern GxEPD2_BW<GxEPD2_154_D67, GxEPD2_154_D67::HEIGHT> epd;
 
-// Draws the three-line layout. Initializes SPI and the controller on
-// demand (required after hibernate), so it is safe to call any time.
-// partial=true uses partial refresh (fast, no flicker); partial=false
-// does a full refresh (clears ghosting). The panel is sent back to
-// sleep after every refresh to avoid holding it at high voltage.
+// Call once before the first draw of a boot cycle. The controller then
+// stays awake so repeated partial refreshes do not flash.
+void displayInit();
+
+// Draws the three-line layout. partial=true uses partial refresh (fast,
+// no flicker); partial=false does a full refresh (clears ghosting).
 // confirmed inverts the center band to signal the confirmed selection.
 void displayDrawWords(const char* prev, const char* cur, const char* next,
                       bool confirmed, bool partial);
+
+// Puts the panel into deep sleep. Call only before the MCU sleeps;
+// the next refresh requires displayInit() again.
+void displayHibernate();
