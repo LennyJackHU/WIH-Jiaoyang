@@ -39,9 +39,17 @@ void Picker::stepForward() {
 }
 
 void Picker::stepBackward() {
-    if (hasPrev()) {
-        cur = (uint8_t)((cur + HISTORY_LEN - 1) % HISTORY_LEN);
+    if (!hasPrev()) {
+        // Oldest history entry reached: extend backwards with a fresh
+        // random word instead of getting stuck on the same word.
+        int16_t next = hasNext() ? hist[(cur + 1) % HISTORY_LEN] : hist[cur];
+        first = (uint8_t)((first + HISTORY_LEN - 1) % HISTORY_LEN);
+        hist[first] = randomAvoiding(hist[cur], next);
+        if (first == last) { // ring was full: drop the newest entry
+            last = (uint8_t)((last + HISTORY_LEN - 1) % HISTORY_LEN);
+        }
     }
+    cur = (uint8_t)((cur + HISTORY_LEN - 1) % HISTORY_LEN);
 }
 
 void Picker::refreshRandom() {
