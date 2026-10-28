@@ -182,10 +182,17 @@ void loop() {
     } else {
     switch (inputPollButtons()) {
     case BtnEvent::CONFIRM:
-        Serial.println("button A confirmed");
-        confirmed = true;
-        saveAll();
-        dirty = true;
+        if (confirmed) {
+            // Second press on an already-selected word: send it to the
+            // nearby module. Transmission is intentionally not implemented
+            // yet; this is only the hook for it.
+            Serial.println("button A again: transmit to nearby module (TODO)");
+        } else {
+            Serial.println("button A confirmed");
+            confirmed = true;
+            saveAll();
+            dirty = true;
+        }
         lastActivityMs = now;
         break;
     case BtnEvent::REFRESH:

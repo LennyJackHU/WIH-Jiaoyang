@@ -54,7 +54,7 @@
 - **开发板**：ESP32-S3-DevKitC-1（ESP32-S3-WROOM-1）
 - **外设**：Waveshare 1.54" e-Paper 模块 V2/V2.1（GDEH0154D67，200×200）、EC11 旋转编码器、2 个实体按钮
 - **框架**：PlatformIO + Arduino（`platformio.ini` 中固定依赖：GxEPD2、ESP32Encoder）
-- **功能**：内置 2000 高频英语词（`src/words.h` + `src/words.cpp`，常驻 Flash），旋转编码器滚轮式随机选词，A 键确认 / B 键刷新，无操作约 0.4 秒后自动深睡、唤醒恢复原状态
+- **功能**：内置 2000 高频英语词（`src/words.h` + `src/words.cpp`，常驻 Flash），编码器滚轮式随机选词（无限随机、双向无终点），A 键选中/再按传输（预留）、B 键刷新，选中后转动编码器取消选中，无操作约 0.4 秒自动深睡、唤醒恢复原状态（详见 `docs/wiring.md` 交互逻辑）
 - **接线**：见 `docs/wiring.md`
 - **构建/烧录**：`pio run` / `pio run -t upload`（词库更新：`python3 tools/build_words.py`）
 - **验收**：烧录后按需求文档第七节逐条核对（启动三行显示、双向滚动、历史回放、按钮功能、休眠保持、重启恢复）
