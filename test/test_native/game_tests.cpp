@@ -27,6 +27,10 @@ uint32_t randomA() { return stepRandom(stateA); }
 uint32_t randomB() { return stepRandom(stateB); }
 uint32_t randomC() { return stepRandom(stateC); }
 
+uint16_t randomSequence[16];
+unsigned randomSequencePos;
+uint32_t sequenceRandom() { return randomSequence[randomSequencePos++]; }
+
 class TestPort : public BytePort {
 public:
     TestPort* peer = nullptr;
@@ -84,6 +88,12 @@ void connect(Device& a, Device& b) {
     a.right.peer = &b.left;
     b.left.peer = &a.right;
     a.right.online = b.left.online = true;
+}
+
+void connectReversed(Device& a, Device& b) {
+    a.left.peer = &b.right;
+    b.right.peer = &a.left;
+    a.left.online = b.right.online = true;
 }
 
 void disconnect(Device& a, Device& b) {
@@ -383,6 +393,216 @@ void test_three_contributions_and_two_link_guard() {
     TEST_ASSERT_FALSE(center.game.hasSentence());
 }
 
+void test_refresh_never_returns_current_word() {
+    const uint16_t values[] = {10, 11, 12, 11, 12, 13};
+    for (unsigned i = 0; i < 6; ++i) randomSequence[i] = values[i];
+    randomSequencePos = 0;
+    Picker picker(sequenceRandom);
+    picker.init();
+    TEST_ASSERT_EQUAL_STRING(WORDS[11], picker.currentWord());
+    picker.refreshRandom();
+    TEST_ASSERT_EQUAL_STRING(WORDS[12], picker.currentWord());
+    TEST_ASSERT_EQUAL_STRING(WORDS[13], picker.nextWord());
+}
+
+void test_simultaneous_bidirectional_transfer_keeps_sentence() {
+    Device a(randomA);
+    Device b(randomB);
+    connect(a, b);
+    uint32_t now = 0;
+    beginPair(a, b, now);
+    run(a, b, now, 1000);
+    std::string aSent = a.game.currentWord();
+    std::string bSent = b.game.currentWord();
+    a.game.pressConfirm(now);
+    b.game.pressConfirm(now);
+    a.game.pressConfirm(now);
+    b.game.pressConfirm(now);
+    run(a, b, now, 1800);
+    TEST_ASSERT_FALSE(a.game.transferPending());
+    TEST_ASSERT_FALSE(b.game.transferPending());
+    TEST_ASSERT_EQUAL(WordGame::View::Sentence, a.game.view());
+    TEST_ASSERT_EQUAL(WordGame::View::Sentence, b.game.view());
+    TEST_ASSERT_EQUAL_STRING(bSent.c_str(), a.game.rightWord());
+    TEST_ASSERT_EQUAL_STRING(aSent.c_str(), b.game.leftWord());
+    TEST_ASSERT_STR_NE(aSent.c_str(), a.game.currentWord());
+    TEST_ASSERT_STR_NE(bSent.c_str(), b.game.currentWord());
+}
+
+void test_error_requires_pending_peer() {
+    Device a(randomA);
+    Device b(randomB);
+    connect(a, b);
+    uint32_t now = 0;
+    beginPair(a, b, now);
+    run(a, b, now, 1000);
+    a.game.pressConfirm(now);
+    a.game.pressConfirm(now);
+    TEST_ASSERT_TRUE(a.game.transferPending());
+    char bodyText[96];
+    snprintf(bodyText, sizeof(bodyText), "{\"req\":\"%s\",\"code\":\"INVALID\"}",
+             a.game.pendingRequest());
+    JsonReader body(bodyText, strlen(bodyText));
+    NetMessage forged = {};
+    snprintf(forged.src, sizeof(forged.src), "0000000000000003");
+    snprintf(forged.boot, sizeof(forged.boot), "00000000000000c1");
+    snprintf(forged.dst, sizeof(forged.dst), "%s", a.node.identity().id);
+    snprintf(forged.kind, sizeof(forged.kind), "ERROR");
+    forged.ingress = Port::Right;
+    forged.ttl = 3;
+    forged.seq = 99;
+    a.game.onNet(forged, body);
+    TEST_ASSERT_TRUE(a.game.transferPending());
+    snprintf(forged.src, sizeof(forged.src), "%s", b.node.identity().id);
+    snprintf(forged.boot, sizeof(forged.boot), "%s", b.node.identity().boot);
+    a.game.onNet(forged, body);
+    TEST_ASSERT_FALSE(a.game.transferPending());
+}
+
+void test_cancel_requests_save() {
+    Device a(randomA);
+    uint32_t now = 0;
+    Identity ai = identity("0000000000000001", "00000000000000a1");
+    TEST_ASSERT_TRUE(a.game.begin(ai, now));
+    a.game.pressConfirm(now);
+    TEST_ASSERT_TRUE(a.game.consumeSaveRequest());
+    a.game.pressRefresh(now);
+    TEST_ASSERT_TRUE(a.game.consumeSaveRequest());
+    a.game.pressConfirm(now);
+    TEST_ASSERT_TRUE(a.game.consumeSaveRequest());
+    a.game.turnEncoder(1, now);
+    TEST_ASSERT_TRUE(a.game.consumeSaveRequest());
+}
+
+NetMessage testMessage(Device& src, Device& dst, Port ingress, const char* kind,
+                       const char* req, const char* text) {
+    NetMessage message = {};
+    snprintf(message.src, sizeof(message.src), "%s", src.node.identity().id);
+    snprintf(message.boot, sizeof(message.boot), "%s", src.node.identity().boot);
+    snprintf(message.dst, sizeof(message.dst), "%s", dst.node.identity().id);
+    snprintf(message.kind, sizeof(message.kind), "%s", kind);
+    message.ingress = ingress;
+    message.ttl = 3;
+    message.seq = 1;
+    (void)req;
+    (void)text;
+    return message;
+}
+
+void test_reversed_reconnect_migrates_receipt() {
+    Device a(randomA);
+    Device b(randomB);
+    connect(a, b);
+    uint32_t now = 0;
+    beginPair(a, b, now);
+    run(a, b, now, 1000);
+    std::string sent = a.game.currentWord();
+    b.left.dropAccepts = true;
+    a.game.pressConfirm(now);
+    a.game.pressConfirm(now);
+    std::string req = a.game.pendingRequest();
+    TEST_ASSERT_FALSE(req.empty());
+    run(a, b, now, 850);
+    TEST_ASSERT_EQUAL_STRING(sent.c_str(), b.game.leftWord());
+    disconnect(a, b);
+    run(a, b, now, 3500);
+    TEST_ASSERT_TRUE(a.game.transferPending());
+    b.left.dropAccepts = false;
+    connectReversed(a, b);
+    run(a, b, now, 1800);
+    TEST_ASSERT_EQUAL_STRING("", b.game.leftWord());
+    TEST_ASSERT_EQUAL_STRING(sent.c_str(), b.game.rightWord());
+    TEST_ASSERT_EQUAL_UINT32(1, b.game.receivedTransfers());
+    TEST_ASSERT_FALSE(a.game.transferPending());
+    TEST_ASSERT_TRUE(b.game.exportReceipts(nullptr, 0) == 0);
+}
+
+void test_restored_receipt_blocks_replay_after_clear() {
+    Device a(randomA);
+    Device b(randomB);
+    connect(a, b);
+    uint32_t now = 0;
+    beginPair(a, b, now);
+    run(a, b, now, 1000);
+    std::string sent = a.game.currentWord();
+    a.game.pressConfirm(now);
+    a.game.pressConfirm(now);
+    std::string req = a.game.pendingRequest();
+    run(a, b, now, 1200);
+    WordGame::ReceiptState receipts[8];
+    uint8_t count = b.game.exportReceipts(receipts, 8);
+    TEST_ASSERT_EQUAL_UINT8(1, count);
+    b.game.pressRefresh(now);
+    TEST_ASSERT_FALSE(b.game.hasSentence());
+    disconnect(a, b);
+    run(a, b, now, 3500);
+
+    Device restored(randomC);
+    Identity bi = identity("0000000000000002", "00000000000000b1");
+    TEST_ASSERT_TRUE(restored.game.begin(bi, now));
+    restored.game.restore(false, "", "", a.node.identity().id, "", receipts, count);
+    connect(a, restored);
+    run(a, restored, now, 1000);
+    NetMessage offer = testMessage(a, restored, Port::Left, "WORD_OFFER", req.c_str(), sent.c_str());
+    char bodyText[256];
+    snprintf(bodyText, sizeof(bodyText), "{\"req\":\"%s\",\"text\":\"%s\"}", req.c_str(), sent.c_str());
+    JsonReader body(bodyText, strlen(bodyText));
+    restored.game.onNet(offer, body);
+    TEST_ASSERT_EQUAL_UINT32(0, restored.game.receivedTransfers());
+    TEST_ASSERT_FALSE(restored.game.hasSentence());
+}
+
+void test_unknown_restored_source_is_busy() {
+    Device a(randomA);
+    Device b(randomB);
+    connect(a, b);
+    uint32_t now = 0;
+    beginPair(a, b, now);
+    b.game.restore(false, "alpha", "");
+    run(a, b, now, 1000);
+    NetMessage offer = testMessage(a, b, Port::Left, "WORD_OFFER",
+                                   "123456789abcdef0123456789abcdef0", "beta");
+    const char* bodyText = "{\"req\":\"123456789abcdef0123456789abcdef0\",\"text\":\"beta\"}";
+    JsonReader body(bodyText, strlen(bodyText));
+    b.game.onNet(offer, body);
+    TEST_ASSERT_EQUAL_STRING("alpha", b.game.leftWord());
+    TEST_ASSERT_EQUAL(WordGame::Status::SlotBusy, b.game.status());
+    TEST_ASSERT_EQUAL_UINT32(0, b.game.receivedTransfers());
+}
+
+void test_incomplete_receipts_are_not_evicted() {
+    Device a(randomA);
+    Device b(randomB);
+    connect(a, b);
+    uint32_t now = 0;
+    beginPair(a, b, now);
+    run(a, b, now, 1000);
+    char firstReq[33];
+    for (unsigned i = 0; i < 9; ++i) {
+        char req[33];
+        snprintf(req, sizeof(req), "%08x%08x%08x%08x", i, i, i, i);
+        if (i == 0) snprintf(firstReq, sizeof(firstReq), "%s", req);
+        NetMessage offer = testMessage(a, b, Port::Left, "WORD_OFFER", req, "word");
+        char bodyText[128];
+        snprintf(bodyText, sizeof(bodyText), "{\"req\":\"%s\",\"text\":\"word\"}", req);
+        JsonReader body(bodyText, strlen(bodyText));
+        b.game.onNet(offer, body);
+    }
+    TEST_ASSERT_EQUAL_UINT32(8, b.game.receivedTransfers());
+    TEST_ASSERT_EQUAL(WordGame::Status::SlotBusy, b.game.status());
+    NetMessage done = testMessage(a, b, Port::Left, "WORD_DONE", firstReq, "word");
+    char doneText[96];
+    snprintf(doneText, sizeof(doneText), "{\"req\":\"%s\"}", firstReq);
+    JsonReader doneBody(doneText, strlen(doneText));
+    b.game.onNet(done, doneBody);
+    NetMessage ninth = testMessage(a, b, Port::Left, "WORD_OFFER",
+                                   "88888888888888888888888888888888", "word");
+    const char* ninthText = "{\"req\":\"88888888888888888888888888888888\",\"text\":\"word\"}";
+    JsonReader ninthBody(ninthText, strlen(ninthText));
+    b.game.onNet(ninth, ninthBody);
+    TEST_ASSERT_EQUAL_UINT32(9, b.game.receivedTransfers());
+}
+
 } // namespace
 
 void runGameTests() {
@@ -395,4 +615,12 @@ void runGameTests() {
     RUN_TEST(test_repeated_full_game_cycles);
     RUN_TEST(test_cancel_restore_and_no_link);
     RUN_TEST(test_three_contributions_and_two_link_guard);
+    RUN_TEST(test_refresh_never_returns_current_word);
+    RUN_TEST(test_simultaneous_bidirectional_transfer_keeps_sentence);
+    RUN_TEST(test_error_requires_pending_peer);
+    RUN_TEST(test_cancel_requests_save);
+    RUN_TEST(test_reversed_reconnect_migrates_receipt);
+    RUN_TEST(test_restored_receipt_blocks_replay_after_clear);
+    RUN_TEST(test_unknown_restored_source_is_busy);
+    RUN_TEST(test_incomplete_receipts_are_not_evicted);
 }

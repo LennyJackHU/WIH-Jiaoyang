@@ -152,6 +152,23 @@ void test_crc_and_json() {
     TEST_ASSERT_EQUAL_UINT32(writer.size() + 11, frameLen);
     TEST_ASSERT_EQUAL_CHAR('@', frame[0]);
     TEST_ASSERT_EQUAL_CHAR('\n', frame[frameLen - 1]);
+    JsonWriter nullWriter(nullptr, 16);
+    nullWriter.beginObject();
+    TEST_ASSERT_FALSE(nullWriter.finish());
+    TEST_ASSERT_FALSE(encodeFrame(writer.data(), writer.size(), nullptr, 512, frameLen));
+}
+
+void test_json_depth_roundtrip() {
+    char json[128];
+    JsonWriter writer(json, sizeof(json));
+    for (unsigned i = 0; i < JSON_MAX_DEPTH; ++i) writer.beginObject(i == 0 ? nullptr : "a");
+    writer.fieldUInt("v", 1);
+    for (unsigned i = 0; i < JSON_MAX_DEPTH; ++i) writer.endObject();
+    TEST_ASSERT_TRUE(writer.finish());
+    TEST_ASSERT_TRUE(JsonReader(writer.data(), writer.size()).valid());
+    JsonWriter tooDeep(json, sizeof(json));
+    for (unsigned i = 0; i <= JSON_MAX_DEPTH; ++i) tooDeep.beginObject(i == 0 ? nullptr : "a");
+    TEST_ASSERT_FALSE(tooDeep.finish());
 }
 
 void test_handshake_information_and_disconnect() {
@@ -236,6 +253,7 @@ void runProtocolFaultTests();
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_crc_and_json);
+    RUN_TEST(test_json_depth_roundtrip);
     RUN_TEST(test_handshake_information_and_disconnect);
     RUN_TEST(test_foreign_kit_is_rejected);
     RUN_TEST(test_recorder_role_mismatch_is_rejected);

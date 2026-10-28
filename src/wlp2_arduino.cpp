@@ -16,9 +16,34 @@ void UartBytePort::write(const uint8_t* data, size_t len) {
     }
 }
 
-void wlp2UartInit() {
+static const size_t UART_BUFFER_BYTES = 4096;
+static volatile uint32_t leftErrors = 0;
+static volatile uint32_t rightErrors = 0;
+
+static void leftUartError(hardwareSerial_error_t) {
+    ++leftErrors;
+}
+
+static void rightUartError(hardwareSerial_error_t) {
+    ++rightErrors;
+}
+
+uint32_t wlp2UartErrors(wlp2::Port port) {
+    if (port == wlp2::Port::Left) return leftErrors;
+    if (port == wlp2::Port::Right) return rightErrors;
+    return leftErrors + rightErrors;
+}
+
+bool wlp2UartInit() {
+    bool ok = Serial1.setRxBufferSize(UART_BUFFER_BYTES) == UART_BUFFER_BYTES &&
+              Serial1.setTxBufferSize(UART_BUFFER_BYTES) == UART_BUFFER_BYTES &&
+              Serial2.setRxBufferSize(UART_BUFFER_BYTES) == UART_BUFFER_BYTES &&
+              Serial2.setTxBufferSize(UART_BUFFER_BYTES) == UART_BUFFER_BYTES;
+    Serial1.onReceiveError(leftUartError);
+    Serial2.onReceiveError(rightUartError);
     Serial1.begin(115200, SERIAL_8N1, PIN_UART_L_RX, PIN_UART_L_TX);
     Serial2.begin(115200, SERIAL_8N1, PIN_UART_R_RX, PIN_UART_R_TX);
+    return ok && Serial1 && Serial2;
 }
 
 void wlp2MakeIdentity(wlp2::Identity& identity) {

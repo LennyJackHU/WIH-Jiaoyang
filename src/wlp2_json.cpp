@@ -189,7 +189,7 @@ private:
     }
 
     void value(unsigned depth) {
-        if (!ok_ || depth > 5) {
+        if (!ok_ || depth > JSON_MAX_DEPTH) {
             ok_ = false;
             return;
         }
@@ -476,7 +476,8 @@ bool JsonReader::isNull(const char* key) const {
 }
 
 JsonWriter::JsonWriter(char* buffer, size_t capacity) : buffer_(buffer), capacity_(capacity) {
-    if (capacity_) buffer_[0] = '\0';
+    if (!buffer_) ok_ = false;
+    else if (capacity_) buffer_[0] = '\0';
 }
 
 void JsonWriter::append(char c) {
@@ -523,7 +524,7 @@ void JsonWriter::key(const char* name) {
 void JsonWriter::beginObject(const char* name) {
     if (name) key(name);
     beforeValue();
-    if (depth_ >= 6) {
+    if (depth_ >= JSON_MAX_DEPTH) {
         ok_ = false;
         return;
     }
@@ -635,7 +636,7 @@ bool JsonWriter::finish() {
 
 bool encodeFrame(const char* json, size_t jsonLen, char* out, size_t capacity,
                  size_t& frameLen) {
-    if (!json || jsonLen == 0 || jsonLen > JSON_MAX) return false;
+    if (!json || !out || jsonLen == 0 || jsonLen > JSON_MAX) return false;
     for (size_t i = 0; i < jsonLen; ++i) {
         if (json[i] == '\t' || json[i] == '\r' || json[i] == '\n') return false;
     }

@@ -53,7 +53,8 @@ void Picker::stepBackward() {
 
 void Picker::refreshRandom() {
     int16_t prev = hasPrev() ? hist[(cur + HISTORY_LEN - 1) % HISTORY_LEN] : -1;
-    hist[cur] = randomAvoiding(prev, -1);
+    int16_t old = hist[cur];
+    hist[cur] = randomAvoiding(prev, old);
     // drop any lookahead and regenerate it against the new current word
     last = (uint8_t)((cur + 1) % HISTORY_LEN);
     if (last == first) {

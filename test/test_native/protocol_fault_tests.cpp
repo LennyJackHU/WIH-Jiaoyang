@@ -34,6 +34,7 @@ public:
     bool corruptNextNet = false;
     bool duplicateNextNet = false;
     bool captureNextNet = false;
+    bool captureNextPong = false;
     std::vector<uint8_t> captured;
     std::deque<uint8_t> incoming;
 
@@ -48,7 +49,13 @@ public:
         if (!online || !txOnline || !peer || !peer->online) return;
         std::string frame(reinterpret_cast<const char*>(data), len);
         bool net = frame.find("\"t\":\"NET\"") != std::string::npos;
+        bool pong = frame.find("\"t\":\"PONG\"") != std::string::npos;
         bool lack = frame.find("\"t\":\"LACK\"") != std::string::npos;
+        if (pong && captureNextPong) {
+            captureNextPong = false;
+            captured.assign(data, data + len);
+            return;
+        }
         if (lack && dropNextLack) {
             dropNextLack = false;
             return;
@@ -273,6 +280,48 @@ void test_three_node_forward_and_reorder() {
     TEST_ASSERT_EQUAL_STRING(ai.id, b.recorder.messages[0].src);
 }
 
+void test_buffered_pong_prevents_timeout_reset() {
+    Device a(randomA);
+    Device b(randomB);
+    connect(a, b);
+    uint32_t now = 0;
+    beginPair(a, b, now);
+    run(a, b, now, 900);
+    char sid[33];
+    snprintf(sid, sizeof(sid), "%s", a.node.link(Port::Right).sid);
+    b.left.captureNextPong = true;
+    run(a, b, now, 200);
+    TEST_ASSERT_FALSE(b.left.captured.empty());
+    now += 3000;
+    a.right.incoming.insert(a.right.incoming.end(), b.left.captured.begin(), b.left.captured.end());
+    a.node.tick(now);
+    TEST_ASSERT_TRUE(a.node.link(Port::Right).up());
+    TEST_ASSERT_EQUAL_STRING(sid, a.node.link(Port::Right).sid);
+}
+
+void test_broadcast_shares_seq_across_paths() {
+    Device a(randomA);
+    Device b(randomB);
+    Device c(randomC);
+    connect(a, b);
+    connectRight(b, c);
+    connectRight(c, a);
+    uint32_t now = 0;
+    Identity ai = identityFor(1), bi = identityFor(2), ci = identityFor(3);
+    TEST_ASSERT_TRUE(a.node.begin(ai, now));
+    TEST_ASSERT_TRUE(b.node.begin(bi, now));
+    TEST_ASSERT_TRUE(c.node.begin(ci, now));
+    run(a, b, c, now, 1400);
+    const char* body = "{\"rev\":1,\"text\":\"alpha\"}";
+    TEST_ASSERT_TRUE(a.node.sendNet("*", "STATE_EVT", body, now));
+    run(a, b, c, now, 600);
+    TEST_ASSERT_EQUAL(0, a.recorder.messages.size());
+    TEST_ASSERT_EQUAL(1, b.recorder.messages.size());
+    TEST_ASSERT_EQUAL(1, c.recorder.messages.size());
+    TEST_ASSERT_EQUAL_STRING(body, b.recorder.bodies[0].c_str());
+    TEST_ASSERT_EQUAL_STRING(body, c.recorder.bodies[0].c_str());
+}
+
 std::vector<uint8_t> craftedNet(const Identity& source, const Identity& target,
                                 const char* sid, uint32_t tx, uint32_t seq) {
     char json[1024];
@@ -343,6 +392,23 @@ void test_busy_and_interbyte_timeout() {
     TEST_ASSERT_EQUAL(1, d.recorder.messages.size());
 }
 
+void test_crc_prefix_resync() {
+    Device a(randomA);
+    Device b(randomB);
+    connect(a, b);
+    uint32_t now = 0;
+    beginPair(a, b, now);
+    run(a, b, now, 900);
+    Identity ai = identityFor(1), bi = identityFor(2);
+    LinkInfo link = b.node.link(Port::Left);
+    std::vector<uint8_t> frame = craftedNet(ai, bi, link.sid, 1, 99);
+    const uint8_t prefix[] = {'@','{','}','\t','0'};
+    b.left.incoming.insert(b.left.incoming.end(), prefix, prefix + sizeof(prefix));
+    b.left.incoming.insert(b.left.incoming.end(), frame.begin(), frame.end());
+    b.node.tick(now);
+    TEST_ASSERT_EQUAL(1, b.recorder.messages.size());
+}
+
 } // namespace
 
 void runProtocolFaultTests() {
@@ -350,5 +416,8 @@ void runProtocolFaultTests() {
     RUN_TEST(test_failed_send_preserves_next_tx);
     RUN_TEST(test_one_way_failure_and_stale_session);
     RUN_TEST(test_three_node_forward_and_reorder);
+    RUN_TEST(test_buffered_pong_prevents_timeout_reset);
+    RUN_TEST(test_broadcast_shares_seq_across_paths);
     RUN_TEST(test_busy_and_interbyte_timeout);
+    RUN_TEST(test_crc_prefix_resync);
 }

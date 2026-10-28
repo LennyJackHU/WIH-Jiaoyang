@@ -1,5 +1,6 @@
 #include "input.h"
 #include <ESP32Encoder.h>
+#include <esp_attr.h>
 
 // Counts per detent of a typical EC11 encoder in full-quad mode.
 static const int ENC_COUNTS_PER_STEP = 4;
@@ -18,17 +19,21 @@ struct DebouncedButton {
 
 static DebouncedButton btnA;
 static DebouncedButton btnB;
+static RTC_DATA_ATTR bool rtcAActiveLow;
+static RTC_DATA_ATTR bool rtcBActiveLow;
+static RTC_DATA_ATTR bool rtcPolarityValid;
+
+static void buttonRestore(DebouncedButton& b, uint8_t pin, bool activeLow) {
+    b.pin = pin;
+    b.activeLow = activeLow;
+    b.lastChangeMs = 0;
+    pinMode(pin, activeLow ? INPUT_PULLUP : INPUT_PULLDOWN);
+    b.stable = b.lastReading = digitalRead(pin);
+}
 
 static void buttonInit(DebouncedButton& b, uint8_t pin) {
     b.pin = pin;
     b.lastChangeMs = 0;
-    // Polarity detection (assumes the button is not held at boot).
-    // Sample for 60 ms: button modules can produce a brief transient
-    // right after power-on, so a single early read is not reliable.
-    //  - mostly HIGH with pull-up: bare button to GND / module pull-up
-    //    -> active low, keep the pull-up
-    //  - mostly LOW: module with pull-down / button to 3V3
-    //    -> active high, use a pull-down so the press can be seen
     pinMode(pin, INPUT_PULLUP);
     int highs = 0, samples = 0;
     uint32_t start = millis();
@@ -37,9 +42,7 @@ static void buttonInit(DebouncedButton& b, uint8_t pin) {
         samples++;
         delay(2);
     }
-    b.activeLow = highs * 2 >= samples;
-    pinMode(pin, b.activeLow ? INPUT_PULLUP : INPUT_PULLDOWN);
-    b.stable = b.lastReading = digitalRead(pin);
+    buttonRestore(b, pin, highs * 2 >= samples);
 }
 
 static bool pressedLevel(const DebouncedButton& b) {
@@ -50,13 +53,21 @@ static bool isPressed(const DebouncedButton& b) {
     return digitalRead(b.pin) == pressedLevel(b);
 }
 
-void inputInit() {
+void inputInit(bool restorePolarity) {
     ESP32Encoder::useInternalWeakPullResistors = puType::up;
     encoder.attachFullQuad(PIN_ENC_A, PIN_ENC_B);
     encoder.setFilter(1023);
     encoder.clearCount();
-    buttonInit(btnA, PIN_BTN_A);
-    buttonInit(btnB, PIN_BTN_B);
+    if (restorePolarity && rtcPolarityValid) {
+        buttonRestore(btnA, PIN_BTN_A, rtcAActiveLow);
+        buttonRestore(btnB, PIN_BTN_B, rtcBActiveLow);
+    } else {
+        buttonInit(btnA, PIN_BTN_A);
+        buttonInit(btnB, PIN_BTN_B);
+        rtcAActiveLow = btnA.activeLow;
+        rtcBActiveLow = btnB.activeLow;
+        rtcPolarityValid = true;
+    }
 }
 
 int inputReadEncoderSteps() {

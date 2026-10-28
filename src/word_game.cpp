@@ -57,6 +57,10 @@ bool WordGame::begin(const Identity& identity, uint32_t now) {
         remotes_[i].lastQuery = now - 500;
     }
     for (auto& receipt : receipts_) receipt = Receipt();
+    nextReceiptOrder_ = 1;
+    donePending_ = false;
+    doneReq_[0] = doneDst_[0] = '\0';
+    nextDoneMs_ = 0;
     return configured;
 }
 
@@ -133,6 +137,7 @@ void WordGame::localWordChanged() {
 
 void WordGame::pressConfirm(uint32_t now) {
     now_ = now;
+    if (pending_) return;
     if (view_ == View::Sentence) clearSentence();
     if (!confirmed_) {
         confirmed_ = true;
@@ -142,7 +147,6 @@ void WordGame::pressConfirm(uint32_t now) {
         changed();
         return;
     }
-    if (pending_) return;
     if (node_.connectedCount() == 0) {
         setStatus(Status::NoLink);
         return;
@@ -182,6 +186,7 @@ void WordGame::pressRefresh(uint32_t now) {
     if (confirmed_) {
         confirmed_ = false;
         setStatus(Status::None);
+        saveRequested_ = true;
         changed();
         return;
     }
@@ -194,12 +199,14 @@ void WordGame::pressRefresh(uint32_t now) {
 void WordGame::turnEncoder(int steps, uint32_t now) {
     now_ = now;
     if (steps == 0) return;
+    bool needsSave = confirmed_ || pending_;
     if (view_ == View::Sentence) clearSentence();
     if (pending_) {
         pending_ = false;
         pendingReq_[0] = '\0';
     }
     confirmed_ = false;
+    if (needsSave) saveRequested_ = true;
     for (int i = 0; i < steps; ++i) picker_.stepBackward();
     for (int i = 0; i > steps; --i) picker_.stepForward();
     statusUntil_ = 0;
@@ -232,6 +239,26 @@ void WordGame::sendError(const NetMessage& message, const char* req, const char*
     if (out.finish()) node_.sendNet(message.ingress, message.src, "ERROR", body, now_);
 }
 
+bool WordGame::migrateReceipt(Receipt& receipt, Port side) {
+    if (receipt.side == side) return true;
+    char* oldWord = receipt.side == Port::Left ? leftWord_ : rightWord_;
+    char* oldSource = receipt.side == Port::Left ? leftSource_ : rightSource_;
+    char* newWord = side == Port::Left ? leftWord_ : rightWord_;
+    char* newSource = side == Port::Left ? leftSource_ : rightSource_;
+    if (*newWord && (!*newSource || strcmp(newSource, receipt.src) != 0)) return false;
+    if (strcmp(oldWord, receipt.text) == 0) {
+        oldWord[0] = '\0';
+        oldSource[0] = '\0';
+    }
+    copyValue(newWord, TEXT_MAX + 1, receipt.text);
+    copyValue(newSource, 17, receipt.src);
+    receipt.side = side;
+    view_ = View::Sentence;
+    saveRequested_ = true;
+    changed();
+    return true;
+}
+
 void WordGame::receiveOffer(const NetMessage& message, const JsonReader& body) {
     char req[33];
     char text[TEXT_MAX + 1];
@@ -244,35 +271,50 @@ void WordGame::receiveOffer(const NetMessage& message, const JsonReader& body) {
     for (auto& existing : receipts_) {
         if (!existing.used || strcmp(existing.src, message.src) != 0 ||
             strcmp(existing.boot, message.boot) != 0 || strcmp(existing.req, req) != 0) continue;
-        if (strcmp(existing.text, text) != 0 || existing.side != message.ingress) {
+        if (strcmp(existing.text, text) != 0) {
             sendError(message, req, "INVALID");
             return;
         }
+        if (!migrateReceipt(existing, message.ingress)) {
+            sendError(message, req, "BUSY");
+            setStatus(Status::SlotBusy);
+            return;
+        }
         existing.ackPending = true;
-        existing.seenAt = now_;
         return;
     }
     Port side = message.ingress;
     char* word = side == Port::Left ? leftWord_ : rightWord_;
     char* source = side == Port::Left ? leftSource_ : rightSource_;
-    if (*word && *source && strcmp(source, message.src) != 0) {
+    if (*word && (!*source || strcmp(source, message.src) != 0)) {
         sendError(message, req, "BUSY");
         setStatus(Status::SlotBusy);
         return;
     }
-    Receipt* receipt = &receipts_[0];
+    Receipt* receipt = nullptr;
     for (auto& candidate : receipts_) {
         if (!candidate.used) {
             receipt = &candidate;
             break;
         }
-        if (candidate.seenAt < receipt->seenAt) receipt = &candidate;
+    }
+    if (!receipt) {
+        for (auto& candidate : receipts_) {
+            if (candidate.completed && (!receipt || candidate.order < receipt->order)) {
+                receipt = &candidate;
+            }
+        }
+    }
+    if (!receipt) {
+        sendError(message, req, "BUSY");
+        setStatus(Status::SlotBusy);
+        return;
     }
     *receipt = Receipt();
     receipt->used = true;
     receipt->ackPending = true;
     receipt->side = side;
-    receipt->seenAt = now_;
+    receipt->order = nextReceiptOrder_++;
     copyValue(receipt->src, sizeof(receipt->src), message.src);
     copyValue(receipt->boot, sizeof(receipt->boot), message.boot);
     copyValue(receipt->req, sizeof(receipt->req), req);
@@ -287,6 +329,44 @@ void WordGame::receiveOffer(const NetMessage& message, const JsonReader& body) {
     changed();
 }
 
+void WordGame::completeOffer(const NetMessage& message, const JsonReader& body) {
+    char req[33];
+    if (!body.getString("req", req, sizeof(req)) || !validHex(req, 32) ||
+        !directMessage(message) || strcmp(message.dst, node_.identity().id) != 0) return;
+    for (auto& receipt : receipts_) {
+        if (!receipt.used || receipt.completed || strcmp(receipt.src, message.src) != 0 ||
+            strcmp(receipt.boot, message.boot) != 0 || strcmp(receipt.req, req) != 0) continue;
+        receipt.completed = true;
+        saveRequested_ = true;
+        return;
+    }
+}
+
+void WordGame::queueDone(const char* dst, const char* req) {
+    if (donePending_) return;
+    donePending_ = true;
+    copyValue(doneDst_, sizeof(doneDst_), dst);
+    copyValue(doneReq_, sizeof(doneReq_), req);
+    nextDoneMs_ = now_;
+    tryDone(now_);
+}
+
+void WordGame::tryDone(uint32_t now) {
+    if (!donePending_ || static_cast<int32_t>(now - nextDoneMs_) < 0) return;
+    Port port;
+    if (!directPeer(doneDst_, port)) return;
+    char body[96];
+    JsonWriter out(body, sizeof(body));
+    out.beginObject();
+    out.fieldString("req", doneReq_);
+    out.endObject();
+    if (out.finish() && node_.sendNet(port, doneDst_, "WORD_DONE", body, now)) {
+        donePending_ = false;
+    } else {
+        nextDoneMs_ = now + 250;
+    }
+}
+
 void WordGame::receiveAccept(const NetMessage& message, const JsonReader& body) {
     char req[33];
     char side[2];
@@ -295,10 +375,11 @@ void WordGame::receiveAccept(const NetMessage& message, const JsonReader& body) 
         strcmp(message.src, pendingDst_) != 0 || !directMessage(message)) return;
     Port expected = message.ingress == Port::Left ? Port::Right : Port::Left;
     if (strcmp(side, sideName(expected)) != 0) return;
+    queueDone(message.src, req);
     pending_ = false;
     pendingReq_[0] = '\0';
     confirmed_ = false;
-    view_ = View::Picker;
+    view_ = hasSentence() ? View::Sentence : View::Picker;
     picker_.refreshRandom();
     saveRequested_ = true;
     localWordChanged();
@@ -436,14 +517,18 @@ void WordGame::onNet(const NetMessage& message, const JsonReader& body) {
         receiveOffer(message, body);
     } else if (strcmp(message.kind, "WORD_ACCEPT") == 0) {
         receiveAccept(message, body);
+    } else if (strcmp(message.kind, "WORD_DONE") == 0) {
+        completeOffer(message, body);
     } else if (strcmp(message.kind, "ERROR") == 0) {
         char req[33], code[24];
         if (!pending_ || !body.getString("req", req, sizeof(req)) ||
-            !body.getString("code", code, sizeof(code)) || strcmp(req, pendingReq_) != 0) return;
+            !body.getString("code", code, sizeof(code)) || strcmp(req, pendingReq_) != 0 ||
+            strcmp(message.src, pendingDst_) != 0 ||
+            strcmp(message.dst, node_.identity().id) != 0 || !directMessage(message)) return;
         if (strcmp(code, "BUSY") == 0) {
             nextOfferMs_ = now_ + 1000;
             setStatus(Status::SlotBusy);
-        } else {
+        } else if (strcmp(code, "INVALID") == 0 || strcmp(code, "UNSUPPORTED") == 0) {
             pending_ = false;
             setStatus(Status::Invalid);
         }
@@ -479,6 +564,7 @@ void WordGame::tick(uint32_t now) {
     queryRemote(Port::Right, now);
     tryOffer(now);
     flushReceipts(now);
+    tryDone(now);
     if (statusUntil_ && static_cast<int32_t>(now - statusUntil_) >= 0) {
         statusUntil_ = 0;
         setStatus(Status::None);
@@ -495,18 +581,57 @@ const WordGame::RemoteSnapshot& WordGame::remote(Port port) const {
     return remotes_[portIndex(port)].snapshot;
 }
 
-void WordGame::restore(bool confirmed, const char* leftWord, const char* rightWord) {
+void WordGame::restore(bool confirmed, const char* leftWord, const char* rightWord,
+                       const char* leftSource, const char* rightSource,
+                       const ReceiptState* receipts, uint8_t receiptCount) {
     confirmed_ = confirmed;
     pending_ = false;
     pendingReq_[0] = '\0';
+    donePending_ = false;
     copyWord(leftWord_, leftWord);
     copyWord(rightWord_, rightWord);
-    leftSource_[0] = rightSource_[0] = '\0';
+    copyValue(leftSource_, sizeof(leftSource_), leftWord_[0] ? leftSource : "");
+    copyValue(rightSource_, sizeof(rightSource_), rightWord_[0] ? rightSource : "");
+    for (auto& receipt : receipts_) receipt = Receipt();
+    nextReceiptOrder_ = 1;
+    if (receipts) {
+        if (receiptCount > 8) receiptCount = 8;
+        for (uint8_t i = 0; i < receiptCount; ++i) {
+            Receipt& receipt = receipts_[i];
+            receipt.used = true;
+            receipt.completed = receipts[i].completed != 0;
+            receipt.side = receipts[i].side == 0 ? Port::Left : Port::Right;
+            receipt.order = receipts[i].order;
+            copyValue(receipt.src, sizeof(receipt.src), receipts[i].src);
+            copyValue(receipt.boot, sizeof(receipt.boot), receipts[i].boot);
+            copyValue(receipt.req, sizeof(receipt.req), receipts[i].req);
+            copyValue(receipt.text, sizeof(receipt.text), receipts[i].text);
+            if (receipt.order >= nextReceiptOrder_) nextReceiptOrder_ = receipt.order + 1;
+        }
+    }
     view_ = hasSentence() ? View::Sentence : View::Picker;
     status_ = Status::None;
     statusUntil_ = 0;
     saveRequested_ = false;
     changed();
+}
+
+uint8_t WordGame::exportReceipts(ReceiptState* out, uint8_t capacity) const {
+    if (!out) return 0;
+    uint8_t count = 0;
+    for (const auto& receipt : receipts_) {
+        if (!receipt.used || count >= capacity) continue;
+        out[count] = {};
+        copyValue(out[count].src, sizeof(out[count].src), receipt.src);
+        copyValue(out[count].boot, sizeof(out[count].boot), receipt.boot);
+        copyValue(out[count].req, sizeof(out[count].req), receipt.req);
+        copyValue(out[count].text, sizeof(out[count].text), receipt.text);
+        out[count].side = receipt.side == Port::Left ? 0 : 1;
+        out[count].completed = receipt.completed ? 1 : 0;
+        out[count].order = receipt.order;
+        ++count;
+    }
+    return count;
 }
 
 bool WordGame::consumeSaveRequest() {

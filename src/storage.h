@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include "config.h"
-#include "wlp2_json.h"
+#include "word_game.h"
 
 struct PersistState {
     uint32_t magic;
@@ -12,13 +12,17 @@ struct PersistState {
     uint8_t confirmed;
     char leftWord[wlp2::TEXT_MAX + 1];
     char rightWord[wlp2::TEXT_MAX + 1];
+    char leftSource[17];
+    char rightSource[17];
+    uint8_t receiptCount;
+    WordGame::ReceiptState receipts[8];
 };
 
-#define STATE_MAGIC 0x57494832u // "WIH2"
+#define STATE_MAGIC 0x57494833u // "WIH3"
 
 // NVS (flash) persistence - survives power cycles.
 bool storageLoadNvs(PersistState& out);
-void storageSaveNvs(const PersistState& state);
+bool storageSaveNvs(const PersistState& state);
 
 // RTC memory mirror - survives deep sleep, not power loss.
 bool rtcStateValid();

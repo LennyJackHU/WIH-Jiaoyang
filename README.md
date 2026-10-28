@@ -60,5 +60,5 @@
 - **接线与交互**：见 `docs/wiring.md`；烧录前须在 `src/config.h` 配置实际 kit、recorder 和成员 ID，占位 ID 不会通过成员校验。
 - **设计需求**：见 `docs/display-design-requirements.md`（含硬件约束、刷新策略和验收规范）。
 - **构建/烧录**：`pio run` / `pio run -t upload`（词库更新：`python3 tools/build_words.py`）。
-- **无硬件测试**：`pio test -e native`，以固定随机种子和脚本按键运行同一套协议/游戏源码，覆盖双机/三块、双向传词、故障注入及热插拔。
+- **无硬件测试**：`pio test -e native`，30 项测试以固定随机种子和脚本按键运行同一套协议/游戏源码，覆盖双机/三块、双向传词、跨重启幂等、换向重连、故障注入及热插拔。
 - **验收边界**：native 测试和目标编译不等同于实板验收；烧录后仍按 `docs/display-design-requirements.md` 第七节核对显示、电气、休眠和真实 UART。记录者的冻结保存事务与电脑底座导出不在当前实现范围内。

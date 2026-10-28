@@ -38,6 +38,16 @@ public:
         NeighborSnapshot right;
     };
 
+    struct ReceiptState {
+        char src[17];
+        char boot[17];
+        char req[33];
+        char text[wlp2::TEXT_MAX + 1];
+        uint8_t side;
+        uint8_t completed;
+        uint64_t order;
+    };
+
     WordGame(wlp2::Node& node, PickerRandomFn pickerRandom, wlp2::RandomFn requestRandom);
 
     bool begin(const wlp2::Identity& identity, uint32_t now);
@@ -58,6 +68,8 @@ public:
     const char* statusText() const;
     const char* leftWord() const { return leftWord_; }
     const char* rightWord() const { return rightWord_; }
+    const char* leftSource() const { return leftSource_; }
+    const char* rightSource() const { return rightSource_; }
     bool hasSentence() const { return leftWord_[0] || rightWord_[0]; }
     uint32_t wordRev() const { return wordRev_; }
     uint32_t uiRevision() const { return uiRevision_; }
@@ -67,7 +79,10 @@ public:
     uint8_t participantCount() const;
     const RemoteSnapshot& remote(wlp2::Port port) const;
 
-    void restore(bool confirmed, const char* leftWord, const char* rightWord);
+    void restore(bool confirmed, const char* leftWord, const char* rightWord,
+                 const char* leftSource = "", const char* rightSource = "",
+                 const ReceiptState* receipts = nullptr, uint8_t receiptCount = 0);
+    uint8_t exportReceipts(ReceiptState* out, uint8_t capacity) const;
     bool consumeSaveRequest();
     bool consumeDisplayRequest();
 
@@ -81,12 +96,13 @@ private:
     struct Receipt {
         bool used = false;
         bool ackPending = false;
+        bool completed = false;
         char src[17] = {};
         char boot[17] = {};
         char req[33] = {};
         char text[wlp2::TEXT_MAX + 1] = {};
         wlp2::Port side = wlp2::Port::Left;
-        uint32_t seenAt = 0;
+        uint64_t order = 0;
     };
 
     void makeRequest(char* out);
@@ -99,6 +115,10 @@ private:
     void tryOffer(uint32_t now);
     void receiveOffer(const wlp2::NetMessage& message, const wlp2::JsonReader& body);
     void receiveAccept(const wlp2::NetMessage& message, const wlp2::JsonReader& body);
+    bool migrateReceipt(Receipt& receipt, wlp2::Port side);
+    void completeOffer(const wlp2::NetMessage& message, const wlp2::JsonReader& body);
+    void queueDone(const char* dst, const char* req);
+    void tryDone(uint32_t now);
     void sendError(const wlp2::NetMessage& message, const char* req, const char* code);
     void sendNodeInfo(const wlp2::NetMessage& message, const char* req);
     void writeNeighbor(wlp2::JsonWriter& out, const char* key, wlp2::Port port) const;
@@ -128,9 +148,14 @@ private:
     bool displayRequested_ = false;
     Remote remotes_[2] = {};
     Receipt receipts_[8] = {};
+    uint64_t nextReceiptOrder_ = 1;
     bool pending_ = false;
     char pendingReq_[33] = {};
     char pendingDst_[17] = {};
     char pendingText_[wlp2::TEXT_MAX + 1] = {};
     uint32_t nextOfferMs_ = 0;
+    bool donePending_ = false;
+    char doneReq_[33] = {};
+    char doneDst_[17] = {};
+    uint32_t nextDoneMs_ = 0;
 };

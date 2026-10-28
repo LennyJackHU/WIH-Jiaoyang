@@ -351,6 +351,12 @@ void Node::receiveByte(Port which, uint8_t byte, uint32_t now) {
         port.rxCrcLen = 0;
     }
     port.lastRxByte = now;
+    if (port.rxPhase == RxPhase::Crc && byte == '@') {
+        port.rxPhase = RxPhase::Json;
+        port.rxLen = 0;
+        port.rxCrcLen = 0;
+        return;
+    }
     if (port.rxPhase == RxPhase::Discard) {
         if (byte == '\n') port.rxPhase = RxPhase::Idle;
         return;
@@ -594,7 +600,8 @@ bool Node::enqueueNet(Port which, const NetMessage& source, const char* body,
 
 bool Node::sendNet(Port which, const char* dst, const char* kind,
                    const char* bodyJson, uint32_t now) {
-    if (!dst || (strcmp(dst, "*") != 0 && !validHex(dst, 16)) || !validKind(kind)) return false;
+    if (!bodyJson || !dst || (strcmp(dst, "*") != 0 && !validHex(dst, 16)) ||
+        !validKind(kind)) return false;
     if (which == Port::Any) return sendNet(dst, kind, bodyJson, now);
     if (index(which) < 0) return false;
     if (nextSeq_ == 0) {
@@ -617,14 +624,35 @@ bool Node::sendNet(Port which, const char* dst, const char* kind,
 
 bool Node::sendNet(const char* dst, const char* kind,
                    const char* bodyJson, uint32_t now) {
+    if (!bodyJson || !dst || (strcmp(dst, "*") != 0 && !validHex(dst, 16)) ||
+        !validKind(kind)) return false;
     int direct = -1;
+    bool any = false;
     for (unsigned i = 0; i < 2; ++i) {
-        if (state_[i].state == LinkState::Up && strcmp(state_[i].peer.id, dst) == 0) direct = i;
+        if (state_[i].state != LinkState::Up) continue;
+        if (strcmp(state_[i].peer.id, dst) == 0) direct = i;
+        if (direct < 0 || direct == static_cast<int>(i)) any = true;
     }
+    if (!any) return false;
+    if (nextSeq_ == 0) {
+        randomHex(identity_.boot, 16);
+        nextSeq_ = 1;
+        reset(Port::Left, now, true);
+        reset(Port::Right, now, true);
+        return false;
+    }
+    NetMessage message = {};
+    copyText(message.src, sizeof(message.src), identity_.id);
+    copyText(message.boot, sizeof(message.boot), identity_.boot);
+    copyText(message.dst, sizeof(message.dst), dst);
+    copyText(message.kind, sizeof(message.kind), kind);
+    message.seq = nextSeq_++;
+    message.ttl = 3;
+    message.ingress = Port::Any;
     bool sent = false;
     for (unsigned i = 0; i < 2; ++i) {
         if (state_[i].state != LinkState::Up || (direct >= 0 && direct != static_cast<int>(i))) continue;
-        sent = sendNet(static_cast<Port>(i), dst, kind, bodyJson, now) || sent;
+        sent = enqueueNet(static_cast<Port>(i), message, bodyJson, strlen(bodyJson), now) || sent;
     }
     return sent;
 }
@@ -650,14 +678,19 @@ void Node::processPort(Port which, uint32_t now) {
     int i = index(which);
     PortState& port = state_[i];
     if (!port.io) return;
-    if (port.state == LinkState::Up && timeReached(now, port.lastActivity, LINK_TIMEOUT_MS)) {
-        reset(which, now, true);
+    if (port.rxPhase != RxPhase::Idle && timeReached(now, port.lastRxByte, BYTE_TIMEOUT_MS)) {
+        port.rxPhase = RxPhase::Idle;
+        port.rxLen = 0;
+        port.rxCrcLen = 0;
     }
     unsigned budget = 8192;
     while (budget--) {
         int value = port.io->read();
         if (value < 0) break;
         receiveByte(which, static_cast<uint8_t>(value), now);
+    }
+    if (port.state == LinkState::Up && timeReached(now, port.lastActivity, LINK_TIMEOUT_MS)) {
+        reset(which, now, true);
     }
     if (timeReached(now, port.lastHello, HELLO_INTERVAL_MS)) {
         port.lastHello = now;

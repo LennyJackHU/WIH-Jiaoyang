@@ -9,6 +9,7 @@ static const size_t JSON_MAX = 2048;
 static const size_t FRAME_MAX = 2059;
 static const size_t NET_MAX = 1920;
 static const size_t TEXT_MAX = 96;
+static const unsigned JSON_MAX_DEPTH = 5;
 
 enum class JsonType : uint8_t { Missing, Null, Bool, Number, String, Object, Array };
 

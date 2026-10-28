@@ -24,7 +24,7 @@ void displayInit() {
         SPI.begin(PIN_EPD_CLK, -1, PIN_EPD_DIN, PIN_EPD_CS);
         spiBegun = true;
     }
-    epd.init(115200);
+    epd.init(115200, true, 2, false);
     epd.setRotation(0);
     epd.setTextColor(GxEPD_BLACK);
     epd.setTextSize(1);

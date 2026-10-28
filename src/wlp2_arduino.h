@@ -13,5 +13,6 @@ private:
     HardwareSerial& serial_;
 };
 
-void wlp2UartInit();
+bool wlp2UartInit();
+uint32_t wlp2UartErrors(wlp2::Port port);
 void wlp2MakeIdentity(wlp2::Identity& identity);
