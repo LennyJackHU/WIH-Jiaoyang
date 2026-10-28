@@ -70,8 +70,7 @@ static void saveAll() {
 }
 
 static bool wakePinsIdle() {
-    // buttons are active-low: idle means HIGH
-    return digitalRead(PIN_BTN_A) == HIGH && digitalRead(PIN_BTN_B) == HIGH;
+    return inputButtonsReleased(); // polarity auto-detected at boot
 }
 
 static void goToSleep() {
@@ -90,21 +89,22 @@ static void goToSleep() {
     saveAll();
     if (epdReady) displayHibernate(); // panel sleeps only when the MCU sleeps
 
-    // Wake on buttons only. The encoder is not a wake source: its line can
-    // sit at an arbitrary level mid-detent and cause instant re-wakes.
-    const uint64_t wakeMask = (1ULL << PIN_BTN_A) | (1ULL << PIN_BTN_B);
-    esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_LOW);
-    // Route wake pins to the RTC domain with explicit pull-ups (done
-    // after esp_sleep_enable_ext1_wakeup, which reconfigures wake pins).
-    const gpio_num_t wakePins[] = {(gpio_num_t)PIN_BTN_A, (gpio_num_t)PIN_BTN_B};
-    for (gpio_num_t pin : wakePins) {
-        rtc_gpio_init(pin);
-        rtc_gpio_set_direction(pin, RTC_GPIO_MODE_INPUT_ONLY);
-        rtc_gpio_pullup_en(pin);
-        rtc_gpio_pulldown_dis(pin);
+    // Wake on button A only (present on every board). The encoder is not a
+    // wake source: its line can sit at an arbitrary level mid-detent and
+    // cause instant re-wakes. Wake level follows the detected polarity.
+    int wakeLevel = inputPressedLevel(PIN_BTN_A);
+    esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_BTN_A, wakeLevel);
+    rtc_gpio_init((gpio_num_t)PIN_BTN_A);
+    rtc_gpio_set_direction((gpio_num_t)PIN_BTN_A, RTC_GPIO_MODE_INPUT_ONLY);
+    if (wakeLevel == 0) {
+        rtc_gpio_pullup_en((gpio_num_t)PIN_BTN_A);
+        rtc_gpio_pulldown_dis((gpio_num_t)PIN_BTN_A);
+    } else {
+        rtc_gpio_pullup_dis((gpio_num_t)PIN_BTN_A);
+        rtc_gpio_pulldown_en((gpio_num_t)PIN_BTN_A);
     }
     Serial.flush();
-    delay(20); // let RTC pull-ups settle before the power-domain switch
+    delay(20); // let RTC pulls settle before the power-domain switch
     esp_deep_sleep_start();
 }
 
@@ -114,6 +114,8 @@ void setup() {
     uint32_t t0 = millis();
     while (!Serial && millis() - t0 < 2000) delay(10); // wait for USB CDC host
     inputInit();
+    Serial.printf("buttons: A pressedLevel=%d B pressedLevel=%d\n",
+                  inputPressedLevel(PIN_BTN_A), inputPressedLevel(PIN_BTN_B));
 
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     Serial.printf("boot: reset=%d wakeup=%d\n", esp_reset_reason(), cause);
@@ -174,7 +176,7 @@ void loop() {
     }
 
     if (ignoreButtonsUntilRelease) {
-        if (digitalRead(PIN_BTN_A) == HIGH && digitalRead(PIN_BTN_B) == HIGH) {
+        if (inputButtonsReleased()) {
             ignoreButtonsUntilRelease = false;
         }
     } else {
