@@ -1,44 +1,66 @@
 #include <Arduino.h>
 #include <driver/rtc_io.h>
+#include <esp_random.h>
 #include "config.h"
-#include "picker.h"
 #include "display.h"
 #include "input.h"
 #include "storage.h"
+#include "wlp2_arduino.h"
+#include "word_game.h"
 
-static Picker picker;
-static bool confirmed = false;
-static bool dirty = false; // screen content out of date
+static wlp2::Handler initialHandler;
+static UartBytePort leftUart(Serial1);
+static UartBytePort rightUart(Serial2);
+static wlp2::Node node(&leftUart, &rightUart, initialHandler, esp_random);
+static WordGame game(node, esp_random, esp_random);
+static bool protocolReady = false;
+static bool dirty = false;
+static DisplayArea dirtyArea = DisplayArea::Full;
 static uint32_t lastActivityMs = 0;
 static uint32_t lastDrawMs = 0;
 static uint32_t partialCount = 0;
-static bool epdReady = false;        // displayInit() done since boot
-static bool forceFullRefresh = false; // first draw after deep-sleep wake
-static bool ignoreButtonsUntilRelease = false; // swallow the wake-up press
+static bool epdReady = false;
+static bool forceFullRefresh = false;
+static bool ignoreButtonsUntilRelease = false;
 
 static void fillState(PersistState& s) {
+    Picker& picker = game.picker();
     s.magic = STATE_MAGIC;
     memcpy(s.hist, picker.hist, sizeof(s.hist));
     s.first = picker.first;
     s.cur = picker.cur;
     s.last = picker.last;
-    s.confirmed = confirmed ? 1 : 0;
+    s.confirmed = game.confirmed() ? 1 : 0;
+    snprintf(s.leftWord, sizeof(s.leftWord), "%s", game.leftWord());
+    snprintf(s.rightWord, sizeof(s.rightWord), "%s", game.rightWord());
 }
 
 static bool applyState(const PersistState& s) {
-    if (s.magic != STATE_MAGIC) return false;
+    if (s.magic != STATE_MAGIC || s.first >= HISTORY_LEN || s.cur >= HISTORY_LEN ||
+        s.last >= HISTORY_LEN || s.confirmed > 1 ||
+        s.leftWord[wlp2::TEXT_MAX] != '\0' || s.rightWord[wlp2::TEXT_MAX] != '\0') return false;
+    for (int i = 0; i < HISTORY_LEN; i++) {
+        if (s.hist[i] < 0 || s.hist[i] >= WORD_COUNT) return false;
+    }
+    if ((s.leftWord[0] && !wlp2::validText(s.leftWord, strlen(s.leftWord))) ||
+        (s.rightWord[0] && !wlp2::validText(s.rightWord, strlen(s.rightWord)))) return false;
+    Picker& picker = game.picker();
     memcpy(picker.hist, s.hist, sizeof(s.hist));
     picker.first = s.first;
     picker.cur = s.cur;
     picker.last = s.last;
-    confirmed = s.confirmed != 0;
-    // sanity-clamp ring pointers and word indices before they are used
-    if (picker.first >= HISTORY_LEN || picker.cur >= HISTORY_LEN ||
-        picker.last >= HISTORY_LEN) return false;
-    for (int i = 0; i < HISTORY_LEN; i++) {
-        if (s.hist[i] < 0 || s.hist[i] >= WORD_COUNT) return false;
-    }
+    game.restore(s.confirmed != 0, s.leftWord, s.rightWord);
     return true;
+}
+
+static void freshStart() {
+    game.picker().init();
+    game.restore(false, "", "");
+}
+
+static void markDirty(DisplayArea area) {
+    if (!dirty || area == DisplayArea::Full) dirtyArea = area;
+    dirty = true;
 }
 
 static void draw(bool partial) {
@@ -46,37 +68,48 @@ static void draw(bool partial) {
         displayInit();
         epdReady = true;
     }
-    // After deep sleep the controller lost its partial-refresh base frame,
-    // so the first draw must be a full refresh (GxEPD2 recommended practice).
     bool full = forceFullRefresh || !partial || partialCount >= FULL_REFRESH_EVERY;
     if (full) {
         partialCount = 0;
         forceFullRefresh = false;
     }
-    Serial.printf("draw: full=%d cur=%s\n", full, picker.currentWord());
-    displayDrawWords(picker.prevWord(), picker.currentWord(), picker.nextWord(),
-                     confirmed, !full);
-    Serial.println("draw: done");
+    uint32_t drawStartMs = millis();
+    const char* status = protocolReady ? game.statusText() : "SET KIT / MEMBER IDS";
+    Serial.printf("draw: full=%d view=%s cur=%s\n", full,
+                  game.view() == WordGame::View::Sentence ? "sentence" : "picker",
+                  game.currentWord());
+    if (game.view() == WordGame::View::Sentence) {
+        uint8_t words = 1 + (game.leftWord()[0] ? 1 : 0) + (game.rightWord()[0] ? 1 : 0);
+        displayDrawSentence(game.leftWord(), game.currentWord(), game.rightWord(),
+                            status, words, !full);
+    } else {
+        displayDrawWords(game.picker().prevWord(), game.currentWord(), game.picker().nextWord(),
+                         game.confirmed(), !full, dirtyArea, status);
+    }
+    Serial.printf("draw: done full=%d area=%s elapsed=%lums\n", full,
+                  dirtyArea == DisplayArea::Center ? "center" : "screen",
+                  (unsigned long)(millis() - drawStartMs));
     if (!full) partialCount++;
     lastDrawMs = millis();
     dirty = false;
+    dirtyArea = DisplayArea::Full;
+    game.consumeDisplayRequest();
 }
 
 static void saveAll() {
-    PersistState s;
+    PersistState s = {};
     fillState(s);
     rtcStateSave(s);
-    storageSaveNvs(s); // NVS writes only happen here: confirm / pre-sleep
+    storageSaveNvs(s);
+    game.consumeSaveRequest();
 }
 
 static bool wakePinsIdle() {
-    return inputButtonsReleased(); // polarity auto-detected at boot
+    return inputButtonsReleased();
 }
 
 static void goToSleep() {
     if (!wakePinsIdle()) {
-        // Level-triggered wake: sleeping while a wake pin is at its active
-        // level would re-wake instantly. Wait for release instead.
         static uint32_t lastLog = 0;
         if (millis() - lastLog > 1000) {
             lastLog = millis();
@@ -86,12 +119,18 @@ static void goToSleep() {
         return;
     }
     if (dirty) draw(false);
+    if (node.connectedCount() > 0 || game.transferPending()) {
+        if (epdReady) {
+            saveAll();
+            displayHibernate();
+            epdReady = false;
+            forceFullRefresh = true;
+        }
+        return;
+    }
     saveAll();
-    if (epdReady) displayHibernate(); // panel sleeps only when the MCU sleeps
+    if (epdReady) displayHibernate();
 
-    // Wake on button A only (present on every board). The encoder is not a
-    // wake source: its line can sit at an arbitrary level mid-detent and
-    // cause instant re-wakes. Wake level follows the detected polarity.
     int wakeLevel = inputPressedLevel(PIN_BTN_A);
     esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_BTN_A, wakeLevel);
     rtc_gpio_init((gpio_num_t)PIN_BTN_A);
@@ -104,44 +143,47 @@ static void goToSleep() {
         rtc_gpio_pulldown_en((gpio_num_t)PIN_BTN_A);
     }
     Serial.flush();
-    delay(20); // let RTC pulls settle before the power-domain switch
+    delay(20);
     esp_deep_sleep_start();
 }
 
 void setup() {
     Serial.begin(115200);
-    neopixelWrite(PIN_RGB_LED, 0, 0, 0); // onboard RGB LED off
+    neopixelWrite(PIN_RGB_LED, 0, 0, 0);
     uint32_t t0 = millis();
-    while (!Serial && millis() - t0 < 2000) delay(10); // wait for USB CDC host
+    while (!Serial && millis() - t0 < 2000) delay(10);
     inputInit();
     Serial.printf("buttons: A pressedLevel=%d B pressedLevel=%d\n",
                   inputPressedLevel(PIN_BTN_A), inputPressedLevel(PIN_BTN_B));
+    wlp2UartInit();
+    wlp2::Identity identity;
+    wlp2MakeIdentity(identity);
+    protocolReady = game.begin(identity, millis());
+    Serial.printf("wlp2: configured=%d id=%s links=%u\n", protocolReady, identity.id,
+                  node.connectedCount());
 
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     Serial.printf("boot: reset=%d wakeup=%d\n", esp_reset_reason(), cause);
     PersistState s;
 #if FRESH_RANDOM_ON_BOOT
-    // test mode: skip restore, always randomize
     Serial.println("fresh start (test mode)");
-    picker.init();
+    freshStart();
     dirty = true;
     draw(false);
 #else
     bool wokeFromSleep = cause == ESP_SLEEP_WAKEUP_EXT0 || cause == ESP_SLEEP_WAKEUP_EXT1;
     if (wokeFromSleep && rtcStateLoad(s) && applyState(s)) {
-        // Deep-sleep wake: the e-paper still shows the last frame.
-        // Skip display init and redraw entirely.
-        Serial.printf("wake from deep sleep, word=%s\n", picker.currentWord());
+        Serial.printf("wake from deep sleep, word=%s\n", game.currentWord());
         forceFullRefresh = true;
-        ignoreButtonsUntilRelease = true; // the press that woke us is not an action
+        ignoreButtonsUntilRelease = true;
+        game.consumeDisplayRequest();
     } else if (!wokeFromSleep && storageLoadNvs(s) && applyState(s)) {
-        // Power-cycle / reset: restore and repaint once (full refresh).
-        Serial.printf("restored from NVS, word=%s\n", picker.currentWord());
+        Serial.printf("restored from NVS, word=%s\n", game.currentWord());
         dirty = true;
         draw(false);
     } else {
         Serial.println("fresh start");
-        picker.init();
+        freshStart();
         dirty = true;
         draw(false);
     }
@@ -152,66 +194,59 @@ void setup() {
 
 void loop() {
     uint32_t now = millis();
+    game.tick(now);
+    if (game.consumeDisplayRequest()) markDirty(DisplayArea::Full);
+    if (game.consumeSaveRequest()) saveAll();
 
     static uint32_t lastBeat = 0;
     if (now - lastBeat >= 2000) {
         lastBeat = now;
-        Serial.printf("alive ms=%lu dirty=%d confirmed=%d A=%d B=%d cur=%s\n",
-                      (unsigned long)now, dirty, confirmed,
-                      digitalRead(PIN_BTN_A), digitalRead(PIN_BTN_B),
-                      picker.currentWord());
+        Serial.printf("alive ms=%lu dirty=%d confirmed=%d links=%u pending=%d cur=%s\n",
+                      (unsigned long)now, dirty, game.confirmed(), node.connectedCount(),
+                      game.transferPending(), game.currentWord());
     }
 
     int steps = inputReadEncoderSteps();
     if (steps != 0) {
         Serial.printf("encoder steps=%d\n", steps);
-        confirmed = false;
-        for (int i = 0; i < abs(steps); i++) {
-            // direction flipped to match the physical knob feel
-            if (steps > 0) picker.stepBackward();
-            else picker.stepForward();
-        }
-        dirty = true;
+        game.turnEncoder(steps, now);
+        game.consumeDisplayRequest();
+        markDirty(DisplayArea::Full);
         lastActivityMs = now;
     }
 
     if (ignoreButtonsUntilRelease) {
-        if (inputButtonsReleased()) {
-            ignoreButtonsUntilRelease = false;
-        }
+        if (inputButtonsReleased()) ignoreButtonsUntilRelease = false;
     } else {
-    switch (inputPollButtons()) {
-    case BtnEvent::CONFIRM:
-        if (confirmed) {
-            // Second press on an already-selected word: send it to the
-            // nearby module. Transmission is intentionally not implemented
-            // yet; this is only the hook for it.
-            Serial.println("button A again: transmit to nearby module (TODO)");
-        } else {
-            Serial.println("button A confirmed");
-            confirmed = true;
-            saveAll();
-            dirty = true;
+        switch (inputPollButtons()) {
+        case BtnEvent::CONFIRM: {
+            bool wasConfirmed = game.confirmed();
+            bool wasSentence = game.view() == WordGame::View::Sentence;
+            game.pressConfirm(now);
+            game.consumeDisplayRequest();
+            markDirty(!wasConfirmed && game.confirmed() && !wasSentence
+                          ? DisplayArea::Center : DisplayArea::Full);
+            Serial.printf("button A: confirmed=%d pending=%d status=%s\n",
+                          game.confirmed(), game.transferPending(), game.statusText());
+            lastActivityMs = now;
+            break;
         }
-        lastActivityMs = now;
-        break;
-    case BtnEvent::REFRESH:
-        Serial.println("button B refresh/cancel");
-        if (confirmed) confirmed = false;
-        else picker.refreshRandom();
-        dirty = true;
-        lastActivityMs = now;
-        break;
-    default:
-        break;
+        case BtnEvent::REFRESH: {
+            bool centerOnly = game.view() == WordGame::View::Picker && game.confirmed() &&
+                              !game.transferPending();
+            game.pressRefresh(now);
+            game.consumeDisplayRequest();
+            markDirty(centerOnly ? DisplayArea::Center : DisplayArea::Full);
+            Serial.println("button B: refresh/cancel/clear");
+            lastActivityMs = now;
+            break;
+        }
+        default:
+            break;
+        }
     }
-    }
+    if (game.consumeSaveRequest()) saveAll();
 
-    if (dirty && now - lastDrawMs >= DISPLAY_THROTTLE_MS) {
-        draw(true);
-    }
-
-    if (!dirty && now - lastActivityMs >= SLEEP_IDLE_MS) {
-        goToSleep(); // nothing to show and no input: power down immediately
-    }
+    if (dirty && now - lastDrawMs >= DISPLAY_THROTTLE_MS) draw(true);
+    if (!dirty && now - lastActivityMs >= SLEEP_IDLE_MS) goToSleep();
 }

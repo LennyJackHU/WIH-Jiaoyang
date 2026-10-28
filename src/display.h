@@ -11,12 +11,18 @@ extern GxEPD2_BW<GxEPD2_154_D67, GxEPD2_154_D67::HEIGHT> epd;
 // stays awake so repeated partial refreshes do not flash.
 void displayInit();
 
+enum class DisplayArea : uint8_t { Full, Center };
+
 // Draws the three-line layout. partial=true uses partial refresh (fast,
 // no flicker); partial=false does a full refresh (clears ghosting).
+// Center limits a partial refresh to the selection band; Full redraws all lines.
 // confirmed inverts the center band to signal the confirmed selection.
 void displayDrawWords(const char* prev, const char* cur, const char* next,
-                      bool confirmed, bool partial);
+                      bool confirmed, bool partial, DisplayArea area,
+                      const char* status = nullptr);
 
-// Puts the panel into deep sleep. Call only before the MCU sleeps;
-// the next refresh requires displayInit() again.
+void displayDrawSentence(const char* left, const char* own, const char* right,
+                         const char* status, uint8_t participants, bool partial);
+
+// Puts the panel into deep sleep. The next refresh requires displayInit().
 void displayHibernate();

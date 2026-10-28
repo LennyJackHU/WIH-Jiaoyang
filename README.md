@@ -54,7 +54,11 @@
 - **开发板**：ESP32-S3-DevKitC-1（ESP32-S3-WROOM-1）
 - **外设**：Waveshare 1.54" e-Paper 模块 V2/V2.1（GDEH0154D67，200×200）、EC11 旋转编码器、2 个实体按钮
 - **框架**：PlatformIO + Arduino（`platformio.ini` 中固定依赖：GxEPD2、ESP32Encoder）
-- **功能**：内置 2000 高频英语词（`src/words.h` + `src/words.cpp`，常驻 Flash），编码器滚轮式随机选词（无限随机、双向无终点），A 键选中/再按传输（预留）、B 键刷新，选中后转动编码器取消选中，无操作约 0.4 秒自动深睡、唤醒恢复原状态（详见 `docs/wiring.md` 交互逻辑）
-- **接线**：见 `docs/wiring.md`
-- **构建/烧录**：`pio run` / `pio run -t upload`（词库更新：`python3 tools/build_words.py`）
-- **验收**：烧录后按需求文档第七节逐条核对（启动三行显示、双向滚动、历史回放、按钮功能、休眠保持、重启恢复）
+- **功能**：内置 2000 高频英语词，编码器双向无限随机选词；A 第一次确认、第二次向唯一邻居传词；接收方按左右关系组成句子，B 刷新/取消/清句。发送方收到应用层 ACCEPT 后才重新随机，断线可用同一 req 继续，句子不因拔线消失。
+- **通信**：WLP2 双 UART 握手、身份/套件校验、sid 心跳、CRC32、LACK/LBUSY、重传去重、NODE_INFO 邻接核对和最多三块短链转发。普通词块的本机词不被远端覆盖。
+- **显示**：三行选词页 + 200×200 句子页；句子按左到右换行，本机词反显，长词缩略。单机无操作约 5 秒深睡；联机或等待传词时只休眠屏幕，保持 UART。
+- **接线与交互**：见 `docs/wiring.md`；烧录前须在 `src/config.h` 配置实际 kit、recorder 和成员 ID，占位 ID 不会通过成员校验。
+- **设计需求**：见 `docs/display-design-requirements.md`（含硬件约束、刷新策略和验收规范）。
+- **构建/烧录**：`pio run` / `pio run -t upload`（词库更新：`python3 tools/build_words.py`）。
+- **无硬件测试**：`pio test -e native`，以固定随机种子和脚本按键运行同一套协议/游戏源码，覆盖双机/三块、双向传词、故障注入及热插拔。
+- **验收边界**：native 测试和目标编译不等同于实板验收；烧录后仍按 `docs/display-design-requirements.md` 第七节核对显示、电气、休眠和真实 UART。记录者的冻结保存事务与电脑底座导出不在当前实现范围内。
