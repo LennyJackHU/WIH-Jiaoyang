@@ -17,8 +17,10 @@
 #define PIN_BTN_A 7   // confirm / transfer
 #define PIN_BTN_B 8   // refresh / cancel / clear sentence
 
-// ---- Onboard RGB LED ----
+// ---- Onboard RGB LED (v1.1=38, v1.0=48; override for your board) ----
+#ifndef PIN_RGB_LED
 #define PIN_RGB_LED 38
+#endif
 
 // ---- WLP2 neighbor UARTs ----
 #define PIN_UART_L_TX 17

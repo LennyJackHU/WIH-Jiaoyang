@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <driver/rtc_io.h>
 #include <esp_random.h>
+#include <esp32-hal-psram.h>
 #include "config.h"
 #include "display.h"
 #include "input.h"
@@ -257,6 +258,12 @@ void setup() {
     Serial.printf("wlp2: configured=%d uart=%d identity=%d id=%s links=%u\n",
                   protocolReady, uartReady, identityReady, identity.id, node.connectedCount());
     Serial.printf("boot: reset=%d wakeup=%d\n", esp_reset_reason(), cause);
+#ifdef BOARD_HAS_PSRAM
+    Serial.printf("psram: found=%d size=%u free=%u\n", psramFound(),
+                  (unsigned)ESP.getPsramSize(), (unsigned)ESP.getFreePsram());
+#else
+    Serial.println("psram: disabled");
+#endif
     PersistState s;
     ignoreButtonsUntilRelease = wokeFromSleep;
 #if FRESH_RANDOM_ON_BOOT

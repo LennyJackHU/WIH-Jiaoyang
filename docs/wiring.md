@@ -2,6 +2,8 @@
 
 屏幕规格：200×200 黑白，SPI 接口，驱动板 8PIN 排座（2.54mm）。V2.1 驱动板自带电平转换，3.3V 直连即可。屏幕背面有 V2 标签；若实际是 V1 老板（IL0373），需把 `src/display.h` 中的 `GxEPD2_154_D67` 换成 `GxEPD2_154`。
 
+DevKitC 版本也要区分：RGB LED 在 v1.1 是 GPIO38、v1.0 是 GPIO48，可通过 `PIN_RGB_LED` 覆盖。N8R8 是 8 MB QIO Flash + 8 MB OPI PSRAM，GPIO35–37 专用于存储器，不能接外设；当前 UART/屏幕/编码器引脚不占用这些存储器引脚。
+
 ## 墨水屏（8PIN → DevKitC-1）
 
 | e-Paper | DevKitC-1 | GPIO | 说明 |
