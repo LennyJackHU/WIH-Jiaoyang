@@ -55,3 +55,7 @@
 // Test switch: 1 = ignore saved state on boot, always start with fresh
 // random words (verifies RNG + word list). Set to 0 for normal behavior.
 #define FRESH_RANDOM_ON_BOOT  0
+
+// Local-only preview: accept "DEMO <word>" over USB Serial as a virtual
+// right-neighbor word and stay awake for repeated demonstrations.
+#define VIRTUAL_WORD_DEMO     1
