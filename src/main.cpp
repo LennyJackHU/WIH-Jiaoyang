@@ -147,6 +147,9 @@ static void draw(bool partial) {
     }
     uint32_t drawStartMs = millis();
     const char* status = protocolReady ? game.statusText() : "SET KIT / MEMBER IDS";
+#if VIRTUAL_WORD_DEMO
+    if (game.view() == WordGame::View::Sentence) status = "DEMO FROM R";
+#endif
     Serial.printf("draw: full=%d view=%s cur=%s\n", full,
                   game.view() == WordGame::View::Sentence ? "sentence" : "picker",
                   game.currentWord());
@@ -189,6 +192,71 @@ static void serviceNvs(uint32_t now) {
         saveAll();
     }
 }
+
+#if VIRTUAL_WORD_DEMO
+static void serviceVirtualDemo() {
+    static char command[wlp2::TEXT_MAX + 8];
+    static size_t length = 0;
+    static bool overflow = false;
+    while (Serial.available()) {
+        char c = static_cast<char>(Serial.read());
+        if (c == '\r') continue;
+        if (c != '\n') {
+            if (length < sizeof(command) - 1) command[length++] = c;
+            else overflow = true;
+            continue;
+        }
+        command[length] = '\0';
+        length = 0;
+        if (overflow) {
+            overflow = false;
+            Serial.println("demo: command too long");
+            continue;
+        }
+        if (strncmp(command, "DEMO ", 5) != 0) {
+            if (command[0]) Serial.println("demo: use DEMO <word or phrase>");
+            continue;
+        }
+        char* word = command + 5;
+        while (*word == ' ') ++word;
+        char* end = word + strlen(word);
+        while (end > word && end[-1] == ' ') --end;
+        *end = '\0';
+        if (!wlp2::validText(word, strlen(word))) {
+            Serial.println("demo: empty or invalid text");
+            continue;
+        }
+        if (game.view() == WordGame::View::Sentence && game.leftWord()[0] && game.rightWord()[0]) {
+            Serial.println("demo: sentence full; press B before starting another");
+            continue;
+        }
+        char left[wlp2::TEXT_MAX + 1];
+        char right[wlp2::TEXT_MAX + 1];
+        char leftSource[17];
+        char rightSource[17];
+        snprintf(left, sizeof(left), "%s", game.leftWord());
+        snprintf(right, sizeof(right), "%s", game.rightWord());
+        snprintf(leftSource, sizeof(leftSource), "%s", game.leftSource());
+        snprintf(rightSource, sizeof(rightSource), "%s", game.rightSource());
+        bool appendRight = game.view() == WordGame::View::Sentence && left[0] && !right[0];
+        if (appendRight) {
+            snprintf(right, sizeof(right), "%s", word);
+            snprintf(rightSource, sizeof(rightSource), "%s", "0000000000000003");
+        } else {
+            snprintf(left, sizeof(left), "%s", word);
+            snprintf(leftSource, sizeof(leftSource), "%s", "0000000000000002");
+        }
+        game.restore(game.confirmed(), left, right, leftSource, rightSource);
+        game.consumeDisplayRequest();
+        markDirty(DisplayArea::Full);
+        saveAll();
+        lastActivityMs = millis();
+        Serial.printf("demo: %s word=%s | sentence=%s %s %s\n",
+                      appendRight ? "appended R" : "virtual R", word,
+                      game.leftWord(), game.currentWord(), game.rightWord());
+    }
+}
+#endif
 
 static bool wakePinsIdle() {
     return inputButtonsReleased();
@@ -288,6 +356,9 @@ void setup() {
     }
 #endif
     Serial.println("setup done");
+#if VIRTUAL_WORD_DEMO
+    Serial.println("demo: type DEMO <word or phrase>; virtual right neighbor; sleep disabled");
+#endif
     lastActivityMs = millis();
 }
 
@@ -295,6 +366,9 @@ void loop() {
     uint32_t now = millis();
     game.tick(now);
     if (game.consumeDisplayRequest()) markDirty(DisplayArea::Full);
+#if VIRTUAL_WORD_DEMO
+    serviceVirtualDemo();
+#endif
     serviceNvs(now);
 
     static uint32_t lastBeat = 0;
@@ -318,6 +392,10 @@ void loop() {
     handleButtons(now);
     serviceNvs(now);
 
+#if VIRTUAL_WORD_DEMO
+    if (dirty && now - lastDrawMs >= DISPLAY_THROTTLE_MS) draw(true);
+#else
     if (now - lastActivityMs >= SLEEP_IDLE_MS) goToSleep();
     else if (dirty && now - lastDrawMs >= DISPLAY_THROTTLE_MS) draw(true);
+#endif
 }
