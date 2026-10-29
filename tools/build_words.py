@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Filter data/words_raw.txt into src/words.h (PROGMEM table, flash-resident)."""
+"""Build printable ASCII words and phrases from data/words_raw.txt."""
+import json
 import re
 import sys
 
@@ -7,16 +8,16 @@ SRC = "data/words_raw.txt"
 DST_H = "src/words.h"
 DST_CPP = "src/words.cpp"
 MAX_WORDS = 2000
-MIN_LEN, MAX_LEN = 3, 12
+MAX_LEN = 96  # wlp2::TEXT_MAX
 
 words = []
 seen = set()
 with open(SRC, encoding="utf-8") as f:
     for line in f:
-        w = line.strip().lower()
-        if not re.fullmatch(r"[a-z]+", w):
+        w = " ".join(line.strip().split())
+        if not re.fullmatch(r"[ -~]+", w):
             continue
-        if not (MIN_LEN <= len(w) <= MAX_LEN):
+        if not (1 <= len(w.encode("ascii")) <= MAX_LEN):
             continue
         if w in seen:
             continue
@@ -25,8 +26,8 @@ with open(SRC, encoding="utf-8") as f:
         if len(words) >= MAX_WORDS:
             break
 
-if len(words) < MAX_WORDS:
-    sys.exit(f"only {len(words)} words after filtering, source too small")
+if not words:
+    sys.exit("no valid words or phrases after filtering")
 
 with open(DST_H, "w", encoding="utf-8", newline="\n") as f:
     f.write("#pragma once\n")
@@ -39,7 +40,7 @@ with open(DST_CPP, "w", encoding="utf-8", newline="\n") as f:
     f.write('#include "words.h"\n\n')
     f.write("const char* const WORDS[WORD_COUNT] = {\n")
     for w in words:
-        f.write(f'    "{w}",\n')
+        f.write(f"    {json.dumps(w)},\n")
     f.write("};\n")
 
-print(f"wrote {DST_H} + {DST_CPP}: {len(words)} words")
+print(f"wrote {DST_H} + {DST_CPP}: {len(words)} words and phrases")

@@ -38,29 +38,58 @@ static uint16_t textWidth(const GFXfont* font, const char* word) {
     return tbw;
 }
 
+static void fitText(const GFXfont* font, const char* text, int16_t maxWidth,
+                    char* out, size_t capacity) {
+    snprintf(out, capacity, "%s", text);
+    if (textWidth(font, out) <= maxWidth) return;
+    size_t len = strlen(out);
+    while (len > 0) {
+        --len;
+        while (len > 0 && (static_cast<unsigned char>(out[len]) & 0xC0) == 0x80) --len;
+        out[len] = '\0';
+        char candidate[wlp2::TEXT_MAX + 4];
+        snprintf(candidate, sizeof(candidate), "%s...", out);
+        if (textWidth(font, candidate) <= maxWidth) {
+            snprintf(out, capacity, "%s", candidate);
+            return;
+        }
+    }
+    snprintf(out, capacity, ".");
+}
+
 static void drawCentered(const char* word, const GFXfont* font,
                          int16_t yTop, int16_t yBottom, uint16_t color) {
     if (!word || !word[0]) return;
+    char fitted[wlp2::TEXT_MAX + 4];
+    fitText(font, word, CENTER_MAX_W, fitted, sizeof(fitted));
     epd.setFont(font);
     int16_t tbx, tby;
     uint16_t tbw, tbh;
-    epd.getTextBounds(word, 0, 0, &tbx, &tby, &tbw, &tbh);
+    epd.getTextBounds(fitted, 0, 0, &tbx, &tby, &tbw, &tbh);
     int16_t x = (SCREEN_W - tbw) / 2 - tbx;
     int16_t baseline = yTop + (yBottom - yTop) / 2 - tby - (int16_t)tbh / 2;
     epd.setCursor(x, baseline);
     epd.setTextColor(color);
-    epd.print(word);
+    epd.print(fitted);
     epd.setTextColor(GxEPD_BLACK);
 }
 
 static const GFXfont* fitCenterFont(const char* word) {
     static const GFXfont* const tiers[] = {
         &FreeSansBold18pt7b, &FreeSansBold12pt7b, &FreeSans12pt7b,
+        &FreeSans9pt7b,
     };
     for (const GFXfont* f : tiers) {
         if (textWidth(f, word) <= CENTER_MAX_W) return f;
     }
-    return &FreeSans12pt7b;
+    return &FreeSans9pt7b;
+}
+
+static const GFXfont* fitPreviewFont(const char* word) {
+    if (!word || textWidth(&FreeSans12pt7b, word) <= CENTER_MAX_W) {
+        return &FreeSans12pt7b;
+    }
+    return &FreeSans9pt7b;
 }
 
 static void drawHeader(const char* status, uint8_t participants) {
@@ -82,8 +111,8 @@ static void renderWords(const char* prev, const char* cur, const char* next,
     epd.fillScreen(GxEPD_WHITE);
     if (!centerOnly) {
         if (status && status[0]) drawHeader(status, 0);
-        drawCentered(prev, &FreeSans12pt7b, 15, BAND_Y, GxEPD_BLACK);
-        drawCentered(next, &FreeSans12pt7b, BAND_Y + BAND_H, SCREEN_H, GxEPD_BLACK);
+        drawCentered(prev, fitPreviewFont(prev), 15, BAND_Y, GxEPD_BLACK);
+        drawCentered(next, fitPreviewFont(next), BAND_Y + BAND_H, SCREEN_H, GxEPD_BLACK);
     }
 
     const GFXfont* centerFont = fitCenterFont(cur);
