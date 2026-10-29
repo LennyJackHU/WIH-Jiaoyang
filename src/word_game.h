@@ -1,6 +1,7 @@
 #pragma once
 
 #include "picker.h"
+#include "sentence.h"
 #include "wlp2_protocol.h"
 
 class WordGame : public wlp2::Handler {
@@ -44,6 +45,8 @@ public:
         char req[33];
         char text[wlp2::TEXT_MAX + 1];
         uint8_t side;
+        bool positioned;
+        uint8_t position;
         uint8_t completed;
         uint64_t order;
     };
@@ -66,15 +69,24 @@ public:
     View view() const { return view_; }
     Status status() const { return status_; }
     const char* statusText() const;
-    const char* leftWord() const { return leftWord_; }
-    const char* rightWord() const { return rightWord_; }
-    const char* leftSource() const { return leftSource_; }
-    const char* rightSource() const { return rightSource_; }
-    bool hasSentence() const { return leftWord_[0] || rightWord_[0]; }
+    const Sentence& sentence() const { return sentence_; }
+    SentenceEdit editMode() const { return editMode_; }
+    bool insertAfter() const { return insertAfter_; }
+    const char* leftWord() const { return sentence_.text(0); }
+    const char* rightWord() const {
+        return sentence_.empty() ? "" : sentence_.text(sentence_.count() - 1);
+    }
+    const char* leftSource() const { return sentence_.source(0); }
+    const char* rightSource() const {
+        return sentence_.empty() ? "" : sentence_.source(sentence_.count() - 1);
+    }
+    bool hasSentence() const { return !sentence_.empty(); }
     uint32_t wordRev() const { return wordRev_; }
     uint32_t uiRevision() const { return uiRevision_; }
     bool transferPending() const { return pending_; }
     const char* pendingRequest() const { return pending_ ? pendingReq_ : ""; }
+    bool pullPending() const { return pullPending_; }
+    const char* pendingPullRequest() const { return pullPending_ ? pullReq_ : ""; }
     uint32_t receivedTransfers() const { return receivedTransfers_; }
     uint8_t participantCount() const;
     const RemoteSnapshot& remote(wlp2::Port port) const;
@@ -82,6 +94,8 @@ public:
     void restore(bool confirmed, const char* leftWord, const char* rightWord,
                  const char* leftSource = "", const char* rightSource = "",
                  const ReceiptState* receipts = nullptr, uint8_t receiptCount = 0);
+    void restoreSentence(const Sentence& sentence, bool confirmed,
+                         const ReceiptState* receipts = nullptr, uint8_t receiptCount = 0);
     uint8_t exportReceipts(ReceiptState* out, uint8_t capacity) const;
     bool consumeSaveRequest();
     bool consumeDisplayRequest();
@@ -102,6 +116,8 @@ private:
         char req[33] = {};
         char text[wlp2::TEXT_MAX + 1] = {};
         wlp2::Port side = wlp2::Port::Left;
+        bool positioned = false;
+        uint8_t position = 0;
         uint64_t order = 0;
     };
 
@@ -112,10 +128,15 @@ private:
     void localWordChanged();
     bool directPeer(const char* id, wlp2::Port& port) const;
     bool directMessage(const wlp2::NetMessage& message) const;
+    void startOffer(const char* dst, const char* req, const char* text,
+                    bool positioned, uint8_t position, uint32_t now);
     void tryOffer(uint32_t now);
+    void startPull(wlp2::Port port, uint32_t now);
+    void clearPull();
+    void tryPull(uint32_t now);
+    void receivePull(const wlp2::NetMessage& message, const wlp2::JsonReader& body);
     void receiveOffer(const wlp2::NetMessage& message, const wlp2::JsonReader& body);
     void receiveAccept(const wlp2::NetMessage& message, const wlp2::JsonReader& body);
-    bool migrateReceipt(Receipt& receipt, wlp2::Port side);
     void completeOffer(const wlp2::NetMessage& message, const wlp2::JsonReader& body);
     void queueDone(const char* dst, const char* req);
     void tryDone(uint32_t now);
@@ -128,6 +149,7 @@ private:
     bool readNeighbor(const wlp2::JsonReader& body, const char* key,
                       NeighborSnapshot& neighbor) const;
     void flushReceipts(uint32_t now);
+    void restoreReceipts(const ReceiptState* receipts, uint8_t receiptCount);
 
     wlp2::Node& node_;
     wlp2::RandomFn requestRandom_;
@@ -135,10 +157,9 @@ private:
     bool confirmed_ = false;
     View view_ = View::Picker;
     Status status_ = Status::None;
-    char leftWord_[wlp2::TEXT_MAX + 1] = {};
-    char rightWord_[wlp2::TEXT_MAX + 1] = {};
-    char leftSource_[17] = {};
-    char rightSource_[17] = {};
+    Sentence sentence_;
+    SentenceEdit editMode_ = SentenceEdit::Navigate;
+    bool insertAfter_ = false;
     uint32_t wordRev_ = 0;
     uint32_t uiRevision_ = 0;
     uint32_t receivedTransfers_ = 0;
@@ -153,7 +174,14 @@ private:
     char pendingReq_[33] = {};
     char pendingDst_[17] = {};
     char pendingText_[wlp2::TEXT_MAX + 1] = {};
+    bool pendingPositioned_ = false;
+    uint8_t pendingPosition_ = 0;
     uint32_t nextOfferMs_ = 0;
+    bool pullPending_ = false;
+    char pullReq_[33] = {};
+    char pullDst_[17] = {};
+    uint8_t pullPosition_ = 0;
+    uint32_t nextPullMs_ = 0;
     bool donePending_ = false;
     char doneReq_[33] = {};
     char doneDst_[17] = {};

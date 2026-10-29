@@ -1,64 +1,49 @@
 # WIH-Jiaoyang
 
-这是一个用于 **ESP32 开发板协作开发** 的仓库，供团队成员共享代码、实验记录和硬件开发相关资料。
+WIH 是基于 ESP32-S3、1.54 英寸墨水屏和双 UART 邻接连接的协作随机选词器。多块板可以传递当前候选词，并在接收板上编辑一条最多 12 词的有序句子。
 
-## 仓库目标
+## 硬件与固件
 
-- 统一管理 ESP32 项目代码
-- 记录开发板配置、接线和调试信息
-- 方便团队成员协作开发、提交和审查变更
+- **开发板**：ESP32-S3-DevKitC-1，全板固定 **N8R8：8 MB QIO Flash + 8 MB OPI PSRAM**。
+- **外设**：Waveshare 1.54" e-Paper V2/V2.1（GDEH0154D67，200×200）、EC11 旋转编码器、A/B 两个实体按钮。
+- **框架**：PlatformIO + Arduino；依赖 GxEPD2、ESP32Encoder。
+- **唯一固件环境**：`esp32-s3-devkitc-1-n8r8`，同时是 `default_envs`。构建和烧录不需要 `-e`：
 
-## 开发环境
-
-项目可根据具体需求使用以下任一开发方式：
-
-- Arduino IDE
-- PlatformIO
-- ESP-IDF
-
-提交代码时，请同时说明使用的开发框架、ESP32 开发板型号，以及必要的依赖或配置。
-
-## 协作约定
-
-1. 从 `main` 分支创建功能分支。
-2. 提交信息应简明描述本次变更。
-3. 提交前请在实际 ESP32 开发板上验证相关功能。
-4. 涉及引脚、供电或接线变化时，请在提交说明或文档中注明。
-5. 不要提交 Wi-Fi 密码、API 密钥或其他敏感信息。
-
-## 项目结构
-
-随着项目内容增加，可以按使用的开发框架补充以下目录：
-
-```text
-.
-├── README.md
-├── src/          # 应用源码
-├── include/      # 头文件
-├── lib/          # 本地库
-├── docs/         # 接线、配置和实验记录
-└── test/         # 测试代码
+```sh
+pio run
+pio run -t upload
 ```
 
-## 后续开发
+`pio upload` 同样使用默认环境。词库更新运行 `python3 tools/build_words.py`。烧录前必须在 `src/config.h` 配置实际 kit、recorder 和 member ID；占位或未知 ID 不会通过成员校验。
 
-请在开始具体功能开发前补充以下信息：
+## 当前交互
 
-- ESP32 开发板的具体型号
-- 使用的开发框架和版本
-- 目标功能及验收方式
-- 所需传感器、执行器或其他外设
+- **Picker**：内置 2000 个高频英语词，编码器双向无终点选词。A 第一次确认，第二次主动向唯一直接邻居 offer；无邻居或有两个邻居时不自动选目标。B 刷新或取消确认/pending。
+- **Sentence**：任何收词都会进入句子页，最多 12 个有序词。无连接时编码器循环高亮，A 弹出 `delete? y/n`，再按 A 删除、B 取消；Navigate 下 B 清句并回 Picker。
+- **定位拉取**：有唯一有效邻居时，A 进入 InsertSide，显示对方当前候选词；B 切换 `L BEFORE` / `R AFTER`，A 发 `WORD_PULL` 按所选词的前/后位置拉取。空 Sentence 也能拉取首词。
+- **位置规则**：定位 pull 只按句内 `pos`，与物理 UART 左右无关。无 `pos` 的主动 offer 仍按接收入边处理：Left 到句首、Right 到句尾。
+- **完成与故障恢复**：接收方即句子块；发送方仅收到应用层 `WORD_ACCEPT` 后才随机新词。offer/pull 在运行中断线时保留 req 重试且不重复插入，B 可取消本机 pending，拔线不清句。
 
-## 本项目：墨水屏随机选词器（WIH）
+完整的模式切换、双机例子、按键上下文、屏幕布局、协议时序、热插拔和验收步骤见 **[docs/sentence-editor.md](docs/sentence-editor.md)**。
 
-- **开发板**：ESP32-S3-DevKitC-1（ESP32-S3-WROOM-1）
-- **外设**：Waveshare 1.54" e-Paper 模块 V2/V2.1（GDEH0154D67，200×200）、EC11 旋转编码器、2 个实体按钮
-- **框架**：PlatformIO + Arduino（`platformio.ini` 中固定依赖：GxEPD2、ESP32Encoder）
-- **功能**：内置 2000 高频英语词，编码器双向无限随机选词；A 第一次确认、第二次向唯一邻居传词；接收方按左右关系组成句子，B 刷新/取消/清句。发送方收到应用层 ACCEPT 后才重新随机，断线可用同一 req 继续，句子不因拔线消失。
-- **通信**：WLP2 双 UART 握手、身份/套件校验、sid 心跳、CRC32、LACK/LBUSY、重传去重、NODE_INFO 邻接核对和最多三块短链转发。普通词块的本机词不被远端覆盖。
-- **显示**：三行选词页 + 200×200 句子页；句子按左到右换行，本机词反显，长词缩略。单机无操作约 5 秒深睡；联机或等待传词时只休眠屏幕，保持 UART。
-- **接线与交互**：见 `docs/wiring.md`；烧录前须在 `src/config.h` 配置实际 kit、recorder 和成员 ID，占位 ID 不会通过成员校验。
-- **设计需求**：见 `docs/display-design-requirements.md`（含硬件约束、刷新策略和验收规范）。
-- **构建/烧录**：N8 使用 `pio run`；N8R8 使用 `pio run -e esp32-s3-devkitc-1-n8r8` / `pio run -e esp32-s3-devkitc-1-n8r8 -t upload`（词库更新：`python3 tools/build_words.py`）。N8R8 配置为 QIO Flash + OPI PSRAM，启动日志会报告 PSRAM 容量。
-- **无硬件测试**：`pio test -e native`，30 项测试以固定随机种子和脚本按键运行同一套协议/游戏源码，覆盖双机/三块、双向传词、跨重启幂等、换向重连、故障注入及热插拔。
-- **验收边界**：native 测试和目标编译不等同于实板验收；烧录后仍按 `docs/display-design-requirements.md` 第七节核对显示、电气、休眠和真实 UART。记录者的冻结保存事务与电脑底座导出不在当前实现范围内。
+## 显示、通信与保存
+
+- **显示**：三行选词页和 200×200 句子页；句子按顺序换行，cursor 词反显，长词缩略。单机无操作约 5 秒深睡；联机或等待传词时只休眠屏幕并维持 UART。
+- **通信**：WLP2 双 UART 握手、身份/套件校验、sid 心跳、CRC32、LACK/LBUSY、重传去重、NODE_INFO 邻接核对和最多三块短链转发。词传输要求直接邻居。
+- **持久化**：WIH4 保存 Picker、句子顺序、cursor、来源和 receipts，并迁移 NVS WIH1/WIH2/WIH3。编辑模式与 offer/pull pending **不保证跨断电恢复**；断线重试不等于断电续传。
+
+## 测试与验收
+
+```sh
+pio test -e native
+```
+
+当前共 **40 项 native 测试**，覆盖 JSON/WLP2、故障注入、双机/三块、主动 offer、定位 pull、删除/cursor、容量、持久化恢复、幂等和热插拔。native 通过及目标编译通过都不代表实板已验证。
+
+## 文档与边界
+
+- [句子编辑器详细说明与手动验收](docs/sentence-editor.md)
+- [显示设计需求与验收规范](docs/display-design-requirements.md)
+- [接线、电气风险与按钮极性](docs/wiring.md)
+
+当前字体只保证 ASCII 显示；真实 ID 仍需配置；CAPTURE/READY 记录者冻结保存事务、句子历史 Flash 日志和电脑底座导出尚未实现。实体屏幕、真实 UART、电气安全热插拔、休眠电流和残影仍须按文档手动验收。

@@ -34,25 +34,33 @@ static void fillState(PersistState& s) {
     s.cur = picker.cur;
     s.last = picker.last;
     s.confirmed = game.confirmed() ? 1 : 0;
-    snprintf(s.leftWord, sizeof(s.leftWord), "%s", game.leftWord());
-    snprintf(s.rightWord, sizeof(s.rightWord), "%s", game.rightWord());
-    snprintf(s.leftSource, sizeof(s.leftSource), "%s", game.leftSource());
-    snprintf(s.rightSource, sizeof(s.rightSource), "%s", game.rightSource());
+    const Sentence& sentence = game.sentence();
+    s.sentenceCount = sentence.count();
+    s.sentenceCursor = sentence.cursor();
+    for (uint8_t i = 0; i < sentence.count(); ++i) {
+        snprintf(s.sentenceWords[i], sizeof(s.sentenceWords[i]), "%s", sentence.text(i));
+        snprintf(s.sentenceSources[i], sizeof(s.sentenceSources[i]), "%s", sentence.source(i));
+    }
     s.receiptCount = game.exportReceipts(s.receipts, 8);
 }
 
 static bool applyState(const PersistState& s) {
     if (s.magic != STATE_MAGIC || s.first >= HISTORY_LEN || s.cur >= HISTORY_LEN ||
         s.last >= HISTORY_LEN || s.confirmed > 1 || s.receiptCount > 8 ||
-        s.leftWord[wlp2::TEXT_MAX] != '\0' || s.rightWord[wlp2::TEXT_MAX] != '\0' ||
-        s.leftSource[16] != '\0' || s.rightSource[16] != '\0') return false;
+        s.sentenceCount > Sentence::MAX_WORDS ||
+        (s.sentenceCount == 0 && s.sentenceCursor != 0) ||
+        (s.sentenceCount > 0 && s.sentenceCursor >= s.sentenceCount)) return false;
     for (int i = 0; i < HISTORY_LEN; i++) {
         if (s.hist[i] < 0 || s.hist[i] >= WORD_COUNT) return false;
     }
-    if ((s.leftWord[0] && !wlp2::validText(s.leftWord, strlen(s.leftWord))) ||
-        (s.rightWord[0] && !wlp2::validText(s.rightWord, strlen(s.rightWord))) ||
-        (s.leftSource[0] && !wlp2::validHex(s.leftSource, 16)) ||
-        (s.rightSource[0] && !wlp2::validHex(s.rightSource, 16))) return false;
+    for (uint8_t i = 0; i < Sentence::MAX_WORDS; ++i) {
+        if (s.sentenceWords[i][wlp2::TEXT_MAX] != '\0' || s.sentenceSources[i][16] != '\0')
+            return false;
+        if (i >= s.sentenceCount && (s.sentenceWords[i][0] || s.sentenceSources[i][0])) return false;
+        if (i < s.sentenceCount &&
+            (!wlp2::validText(s.sentenceWords[i], strlen(s.sentenceWords[i])) ||
+             (s.sentenceSources[i][0] && !wlp2::validHex(s.sentenceSources[i], 16)))) return false;
+    }
     for (uint8_t i = 0; i < s.receiptCount; ++i) {
         const WordGame::ReceiptState& receipt = s.receipts[i];
         if (receipt.src[16] != '\0' || receipt.boot[16] != '\0' || receipt.req[32] != '\0' ||
@@ -60,15 +68,20 @@ static bool applyState(const PersistState& s) {
         if (!wlp2::validHex(receipt.src, 16) || !wlp2::validHex(receipt.boot, 16) ||
             !wlp2::validHex(receipt.req, 32) ||
             !wlp2::validText(receipt.text, strlen(receipt.text)) || receipt.side > 1 ||
-            receipt.completed > 1 || receipt.order == 0) return false;
+            receipt.completed > 1 || receipt.order == 0 || receipt.positioned > 1 ||
+            receipt.position > Sentence::MAX_WORDS) return false;
     }
+    Sentence sentence;
+    for (uint8_t i = 0; i < s.sentenceCount; ++i) {
+        if (!sentence.insert(i, s.sentenceWords[i], s.sentenceSources[i])) return false;
+    }
+    sentence.setCursor(s.sentenceCursor);
     Picker& picker = game.picker();
     memcpy(picker.hist, s.hist, sizeof(s.hist));
     picker.first = s.first;
     picker.cur = s.cur;
     picker.last = s.last;
-    game.restore(s.confirmed != 0, s.leftWord, s.rightWord, s.leftSource, s.rightSource,
-                 s.receipts, s.receiptCount);
+    game.restoreSentence(sentence, s.confirmed != 0, s.receipts, s.receiptCount);
     return true;
 }
 
@@ -151,9 +164,14 @@ static void draw(bool partial) {
                   game.view() == WordGame::View::Sentence ? "sentence" : "picker",
                   game.currentWord());
     if (game.view() == WordGame::View::Sentence) {
-        uint8_t words = 1 + (game.leftWord()[0] ? 1 : 0) + (game.rightWord()[0] ? 1 : 0);
-        displayDrawSentence(game.leftWord(), game.currentWord(), game.rightWord(),
-                            status, words, !full);
+        const char* candidate = "";
+        if (node.connectedCount() == 1) {
+            wlp2::Port port = node.link(wlp2::Port::Left).up() ? wlp2::Port::Left : wlp2::Port::Right;
+            const WordGame::RemoteSnapshot& remote = game.remote(port);
+            if (remote.valid && remote.orderValid) candidate = remote.text;
+        }
+        displayDrawSentence(game.sentence(), game.sentence().cursor(), game.editMode(),
+                            game.insertAfter(), candidate, status, !full);
     } else {
         displayDrawWords(game.picker().prevWord(), game.currentWord(), game.picker().nextWord(),
                          game.confirmed(), !full, requestedArea, status);
@@ -208,7 +226,7 @@ static void goToSleep() {
     if (dirty) return;
     if (nvsDirty && static_cast<int32_t>(millis() - nextNvsRetryMs) < 0) return;
     if (!saveAll()) return;
-    if (node.connectedCount() > 0 || game.transferPending()) {
+    if (node.connectedCount() > 0 || game.transferPending() || game.pullPending()) {
         if (epdReady) {
             displayHibernate();
             epdReady = false;

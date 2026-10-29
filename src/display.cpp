@@ -101,6 +101,10 @@ static void renderWords(const char* prev, const char* cur, const char* next,
 }
 
 static void fitWord(const GFXfont* font, const char* word, char* out, size_t capacity) {
+    if (!word) {
+        out[0] = '\0';
+        return;
+    }
     snprintf(out, capacity, "%s", word);
     if (textWidth(font, out) <= SENTENCE_W) return;
     size_t len = strlen(out);
@@ -118,13 +122,14 @@ static void fitWord(const GFXfont* font, const char* word, char* out, size_t cap
     snprintf(out, capacity, ".");
 }
 
-static uint8_t flowLines(const GFXfont* font, const char** words, uint8_t count) {
+static uint8_t sentenceLineCount(const GFXfont* font, const Sentence& sentence) {
+    uint8_t count = sentence.count() > 12 ? 12 : sentence.count();
     uint8_t lines = 1;
     int16_t x = 0;
     uint16_t space = textWidth(font, " ");
     for (uint8_t i = 0; i < count; ++i) {
         char fitted[wlp2::TEXT_MAX + 4];
-        fitWord(font, words[i], fitted, sizeof(fitted));
+        fitWord(font, sentence.text(i), fitted, sizeof(fitted));
         uint16_t width = textWidth(font, fitted);
         if (x > 0 && x + space + width > SENTENCE_W) {
             ++lines;
@@ -136,49 +141,29 @@ static uint8_t flowLines(const GFXfont* font, const char** words, uint8_t count)
     return lines;
 }
 
-static void renderSentence(const char* left, const char* own, const char* right,
-                           const char* status, uint8_t participants) {
-    epd.fillScreen(GxEPD_WHITE);
-    drawHeader(status, participants);
-    epd.drawRect(4, 28, 192, 136, GxEPD_BLACK);
-    const char* words[3];
-    bool local[3];
-    uint8_t count = 0;
-    if (left && left[0]) {
-        words[count] = left;
-        local[count++] = false;
-    }
-    words[count] = own;
-    local[count++] = true;
-    if (right && right[0]) {
-        words[count] = right;
-        local[count++] = false;
-    }
-
+static void drawSentenceWords(const Sentence& sentence, uint8_t cursor) {
     const GFXfont* font = &FreeSans12pt7b;
     int16_t lineHeight = 29;
-    uint8_t lines = flowLines(font, words, count);
-    bool fits = true;
-    for (uint8_t i = 0; i < count; ++i) {
-        if (textWidth(font, words[i]) > SENTENCE_W) fits = false;
-    }
-    if (!fits || lines > 4) {
+    uint8_t lines = sentenceLineCount(font, sentence);
+    if (lines > 4) {
         font = &FreeSans9pt7b;
         lineHeight = 23;
-        lines = flowLines(font, words, count);
+        lines = sentenceLineCount(font, sentence);
     }
     if (lines > 5) {
         font = nullptr;
-        lineHeight = 15;
-        lines = flowLines(font, words, count);
+        lineHeight = 10;
+        lines = sentenceLineCount(font, sentence);
     }
-    int16_t y = 30 + (132 - lines * lineHeight) / 2;
+
+    uint8_t count = sentence.count() > 12 ? 12 : sentence.count();
+    int16_t y = 32 + (128 - lines * lineHeight) / 2;
     int16_t x = 0;
     uint16_t space = textWidth(font, " ");
     epd.setFont(font);
     for (uint8_t i = 0; i < count; ++i) {
         char fitted[wlp2::TEXT_MAX + 4];
-        fitWord(font, words[i], fitted, sizeof(fitted));
+        fitWord(font, sentence.text(i), fitted, sizeof(fitted));
         int16_t tbx, tby;
         uint16_t width, height;
         epd.getTextBounds(fitted, 0, 0, &tbx, &tby, &width, &height);
@@ -188,21 +173,80 @@ static void renderSentence(const char* left, const char* own, const char* right,
         }
         if (x > 0) x += space;
         int16_t baseline = y + (lineHeight - height) / 2 - tby;
-        if (local[i]) {
-            epd.fillRect(SENTENCE_X + x - 3, baseline + tby - 3,
-                         width + 6, height + 6, GxEPD_BLACK);
+        bool selected = i == cursor;
+        if (selected) {
+            epd.fillRect(SENTENCE_X + x - 2, baseline + tby - 1,
+                         width + 4, height + 2, GxEPD_BLACK);
         }
         epd.setCursor(SENTENCE_X + x - tbx, baseline);
-        epd.setTextColor(local[i] ? GxEPD_WHITE : GxEPD_BLACK);
+        epd.setTextColor(selected ? GxEPD_WHITE : GxEPD_BLACK);
         epd.print(fitted);
         epd.setTextColor(GxEPD_BLACK);
         x += width;
     }
+}
+
+static void drawInsertOption(const char* label, bool selected, int16_t x) {
+    const int16_t y = 104;
+    const int16_t w = 86;
+    const int16_t h = 36;
+    if (selected) epd.fillRect(x, y, w, h, GxEPD_BLACK);
+    else epd.drawRect(x, y, w, h, GxEPD_BLACK);
+
+    epd.setFont(&FreeSans9pt7b);
+    int16_t tbx, tby;
+    uint16_t width, height;
+    epd.getTextBounds(label, 0, 0, &tbx, &tby, &width, &height);
+    epd.setCursor(x + (w - width) / 2 - tbx, y + (h - height) / 2 - tby);
+    epd.setTextColor(selected ? GxEPD_WHITE : GxEPD_BLACK);
+    epd.print(label);
+    epd.setTextColor(GxEPD_BLACK);
+}
+
+static void drawInsertSide(const char* candidate, bool insertAfter) {
+    char fitted[wlp2::TEXT_MAX + 4];
+    fitWord(&FreeSans12pt7b, candidate, fitted, sizeof(fitted));
+    drawCentered("CANDIDATE", nullptr, 32, 48, GxEPD_BLACK);
+    drawCentered(fitted, &FreeSans12pt7b, 48, 88, GxEPD_BLACK);
+    drawInsertOption("L:BEFORE", !insertAfter, 10);
+    drawInsertOption("R:AFTER", insertAfter, 104);
+}
+
+static void drawFooter(const char* first, const char* second) {
     epd.setFont(nullptr);
-    epd.setCursor(45, 178);
-    epd.print("A:SELECT  B:CLEAR");
-    epd.fillTriangle(8, 183, 8, 191, 16, 187, GxEPD_BLACK);
-    epd.fillTriangle(192, 183, 192, 191, 184, 187, GxEPD_BLACK);
+    epd.setTextSize(1);
+    epd.setTextColor(GxEPD_BLACK);
+    epd.setCursor((SCREEN_W - textWidth(nullptr, first)) / 2, 176);
+    epd.print(first);
+    if (second) {
+        epd.setCursor((SCREEN_W - textWidth(nullptr, second)) / 2, 190);
+        epd.print(second);
+    }
+}
+
+static void renderSentence(const Sentence& sentence, uint8_t cursor, SentenceEdit edit,
+                           bool insertAfter, const char* candidate, const char* status) {
+    epd.fillScreen(GxEPD_WHITE);
+    drawHeader(status, 0);
+    epd.drawRect(4, 28, 192, 136, GxEPD_BLACK);
+
+    if (edit == SentenceEdit::InsertSide) {
+        drawInsertSide(candidate, insertAfter);
+        drawFooter("A:INSERT B:L/R", nullptr);
+        return;
+    }
+
+    if (sentence.empty()) {
+        drawCentered("Empty sentence", &FreeSans12pt7b, 28, 164, GxEPD_BLACK);
+    } else {
+        drawSentenceWords(sentence, cursor);
+    }
+
+    if (edit == SentenceEdit::DeleteConfirm) {
+        drawFooter("delete? y/n", "A:YES  B:NO");
+    } else {
+        drawFooter("ROTATE:SELECT A:DEL/PULL", "B:CANCEL");
+    }
 }
 
 void displayDrawWords(const char* prev, const char* cur, const char* next,
@@ -217,13 +261,14 @@ void displayDrawWords(const char* prev, const char* cur, const char* next,
     } while (epd.nextPage());
 }
 
-void displayDrawSentence(const char* left, const char* own, const char* right,
-                         const char* status, uint8_t participants, bool partial) {
+void displayDrawSentence(const Sentence& sentence, uint8_t cursor, SentenceEdit edit,
+                         bool insertAfter, const char* candidate, const char* status,
+                         bool partial) {
     if (partial) epd.setPartialWindow(0, 0, SCREEN_W, SCREEN_H);
     else epd.setFullWindow();
     epd.firstPage();
     do {
-        renderSentence(left, own, right, status, participants);
+        renderSentence(sentence, cursor, edit, insertAfter, candidate, status);
     } while (epd.nextPage());
 }
 

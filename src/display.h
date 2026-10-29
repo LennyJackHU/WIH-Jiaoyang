@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <GxEPD2_BW.h>
 #include "config.h"
+#include "sentence.h"
 
 // Waveshare 1.54" V2/V2.1 module (GDEH0154D67, SSD1681), 200x200 B/W.
 // Full 200x200 frame buffer = 5000 bytes RAM, no paging needed.
@@ -21,8 +22,9 @@ void displayDrawWords(const char* prev, const char* cur, const char* next,
                       bool confirmed, bool partial, DisplayArea area,
                       const char* status = nullptr);
 
-void displayDrawSentence(const char* left, const char* own, const char* right,
-                         const char* status, uint8_t participants, bool partial);
+void displayDrawSentence(const Sentence& sentence, uint8_t cursor, SentenceEdit edit,
+                         bool insertAfter, const char* candidate, const char* status,
+                         bool partial);
 
 // Puts the panel into deep sleep. The next refresh requires displayInit().
 void displayHibernate();

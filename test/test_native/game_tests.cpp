@@ -2,6 +2,7 @@
 
 #include <deque>
 #include <string>
+#include <vector>
 #include <string.h>
 
 #include "word_game.h"
@@ -37,6 +38,14 @@ public:
     bool online = true;
     bool dropAccepts = false;
     bool dropNextAccept = false;
+    bool dropPulls = false;
+    bool dropNextPull = false;
+    bool dropOffers = false;
+    bool dropNextOffer = false;
+    unsigned accepts = 0;
+    unsigned droppedAccepts = 0;
+    unsigned pulls = 0;
+    unsigned offers = 0;
     std::deque<uint8_t> incoming;
 
     int read() override {
@@ -50,8 +59,20 @@ public:
         if (!online || !peer || !peer->online) return;
         std::string frame(reinterpret_cast<const char*>(data), len);
         bool accept = frame.find("\"kind\":\"WORD_ACCEPT\"") != std::string::npos;
-        if (accept && (dropAccepts || dropNextAccept)) {
-            dropNextAccept = false;
+        bool pull = frame.find("\"kind\":\"WORD_PULL\"") != std::string::npos;
+        bool offer = frame.find("\"kind\":\"WORD_OFFER\"") != std::string::npos;
+        if (accept) ++accepts;
+        if (pull) ++pulls;
+        if (offer) ++offers;
+        if ((accept && (dropAccepts || dropNextAccept)) ||
+            (pull && (dropPulls || dropNextPull)) ||
+            (offer && (dropOffers || dropNextOffer))) {
+            if (accept) {
+                dropNextAccept = false;
+                ++droppedAccepts;
+            }
+            if (pull) dropNextPull = false;
+            if (offer) dropNextOffer = false;
             return;
         }
         peer->incoming.insert(peer->incoming.end(), data, data + len);
@@ -124,6 +145,34 @@ void beginPair(Device& a, Device& b, uint32_t& now) {
     TEST_ASSERT_TRUE(b.game.begin(bi, now));
 }
 
+Sentence makeSentence(const std::vector<std::string>& words, uint8_t cursor = 0) {
+    Sentence sentence;
+    for (const auto& word : words) {
+        TEST_ASSERT_TRUE(sentence.insert(sentence.count(), word.c_str(), ""));
+    }
+    sentence.setCursor(cursor);
+    return sentence;
+}
+
+void assertSentence(const WordGame& game, const std::vector<std::string>& words) {
+    TEST_ASSERT_EQUAL_UINT32(words.size(), game.sentence().count());
+    for (size_t i = 0; i < words.size(); ++i) {
+        TEST_ASSERT_EQUAL_STRING(words[i].c_str(), game.sentence().text(i));
+    }
+}
+
+void requestPull(WordGame& game, uint32_t now, bool after = false) {
+    TEST_ASSERT_EQUAL(WordGame::View::Sentence, game.view());
+    game.pressConfirm(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::InsertSide, game.editMode());
+    if (after) {
+        game.pressRefresh(now);
+        TEST_ASSERT_TRUE(game.insertAfter());
+    }
+    game.pressConfirm(now);
+    TEST_ASSERT_TRUE(game.pullPending());
+}
+
 void test_picker_and_buttons() {
     stateA = 0x13572468;
     Picker picker(randomA);
@@ -179,8 +228,9 @@ void test_left_transfer_and_node_info() {
     TEST_ASSERT_FALSE(a.game.transferPending());
     TEST_ASSERT_FALSE(a.game.confirmed());
     TEST_ASSERT_STR_NE(sent.c_str(), a.game.currentWord());
+    assertSentence(b.game, {sent});
     TEST_ASSERT_EQUAL_STRING(sent.c_str(), b.game.leftWord());
-    TEST_ASSERT_EQUAL_STRING("", b.game.rightWord());
+    TEST_ASSERT_EQUAL_STRING(sent.c_str(), b.game.rightWord());
     TEST_ASSERT_EQUAL_STRING(receiverOwn.c_str(), b.game.currentWord());
     TEST_ASSERT_EQUAL(WordGame::View::Sentence, b.game.view());
     TEST_ASSERT_EQUAL_UINT32(1, b.game.receivedTransfers());
@@ -205,8 +255,9 @@ void test_reverse_transfer_goes_to_right() {
     b.game.pressConfirm(now);
     b.game.pressConfirm(now);
     run(a, b, now, 1200);
+    assertSentence(a.game, {sent});
     TEST_ASSERT_EQUAL_STRING(sent.c_str(), a.game.rightWord());
-    TEST_ASSERT_EQUAL_STRING("", a.game.leftWord());
+    TEST_ASSERT_EQUAL_STRING(sent.c_str(), a.game.leftWord());
     TEST_ASSERT_EQUAL_STRING(receiverOwn.c_str(), a.game.currentWord());
     TEST_ASSERT_STR_NE(sent.c_str(), b.game.currentWord());
     TEST_ASSERT_FALSE(b.game.confirmed());
@@ -290,34 +341,35 @@ void test_repeated_full_game_cycles() {
     uint32_t now = 0;
     beginPair(a, b, now);
     run(a, b, now, 1000);
-    for (unsigned round = 0; round < 24; ++round) {
-        Device& sender = round % 2 ? b : a;
-        Device& receiver = round % 2 ? a : b;
-        std::string sent = sender.game.currentWord();
-        uint32_t received = receiver.game.receivedTransfers();
-        if (round % 5 == 2) {
-            TestPort& ackPort = &sender == &a ? receiver.left : receiver.right;
-            ackPort.dropNextAccept = true;
+    std::vector<std::string> expected;
+    for (unsigned round = 0; round < Sentence::MAX_WORDS; ++round) {
+        std::string offered = a.game.currentWord();
+        if (round % 5 == 2) b.left.dropNextAccept = true;
+        if (round == 0) {
+            a.game.pressConfirm(now);
+            a.game.pressConfirm(now);
+            TEST_ASSERT_TRUE(a.game.transferPending());
+        } else {
+            requestPull(b.game, now);
         }
-        sender.game.pressConfirm(now);
-        sender.game.pressConfirm(now);
         run(a, b, now, 1800);
-        TEST_ASSERT_FALSE(sender.game.transferPending());
-        TEST_ASSERT_FALSE(sender.game.confirmed());
-        TEST_ASSERT_STR_NE(sent.c_str(), sender.game.currentWord());
-        TEST_ASSERT_EQUAL_UINT32(received + 1, receiver.game.receivedTransfers());
-        const char* slot = &sender == &a ? receiver.game.leftWord() : receiver.game.rightWord();
-        TEST_ASSERT_EQUAL_STRING(sent.c_str(), slot);
+        TEST_ASSERT_FALSE(a.game.transferPending());
+        TEST_ASSERT_FALSE(b.game.pullPending());
+        TEST_ASSERT_FALSE(a.game.confirmed());
+        TEST_ASSERT_STR_NE(offered.c_str(), a.game.currentWord());
+        TEST_ASSERT_EQUAL_UINT32(round + 1, b.game.receivedTransfers());
+        expected.insert(expected.begin(), offered);
+        assertSentence(b.game, expected);
+        TEST_ASSERT_EQUAL_UINT8(0, b.game.sentence().cursor());
         disconnect(a, b);
         run(a, b, now, 3300);
-        if (receiver.game.hasSentence()) {
-            TEST_ASSERT_EQUAL_STRING(sent.c_str(), slot);
-        }
+        assertSentence(b.game, expected);
         connect(a, b);
         run(a, b, now, 900);
         TEST_ASSERT_TRUE(a.node.link(Port::Right).up());
         TEST_ASSERT_TRUE(b.node.link(Port::Left).up());
     }
+    TEST_ASSERT_EQUAL_UINT8(Sentence::MAX_WORDS, b.game.sentence().count());
 }
 
 void test_cancel_restore_and_no_link() {
@@ -489,7 +541,7 @@ NetMessage testMessage(Device& src, Device& dst, Port ingress, const char* kind,
     return message;
 }
 
-void test_reversed_reconnect_migrates_receipt() {
+void test_reversed_reconnect_keeps_word_position() {
     Device a(randomA);
     Device b(randomB);
     connect(a, b);
@@ -503,14 +555,15 @@ void test_reversed_reconnect_migrates_receipt() {
     std::string req = a.game.pendingRequest();
     TEST_ASSERT_FALSE(req.empty());
     run(a, b, now, 850);
-    TEST_ASSERT_EQUAL_STRING(sent.c_str(), b.game.leftWord());
+    assertSentence(b.game, {sent});
     disconnect(a, b);
     run(a, b, now, 3500);
     TEST_ASSERT_TRUE(a.game.transferPending());
     b.left.dropAccepts = false;
     connectReversed(a, b);
     run(a, b, now, 1800);
-    TEST_ASSERT_EQUAL_STRING("", b.game.leftWord());
+    assertSentence(b.game, {sent});
+    TEST_ASSERT_EQUAL_STRING(sent.c_str(), b.game.leftWord());
     TEST_ASSERT_EQUAL_STRING(sent.c_str(), b.game.rightWord());
     TEST_ASSERT_EQUAL_UINT32(1, b.game.receivedTransfers());
     TEST_ASSERT_FALSE(a.game.transferPending());
@@ -552,7 +605,7 @@ void test_restored_receipt_blocks_replay_after_clear() {
     TEST_ASSERT_FALSE(restored.game.hasSentence());
 }
 
-void test_unknown_restored_source_is_busy() {
+void test_unknown_restored_source_appends_without_overwrite() {
     Device a(randomA);
     Device b(randomB);
     connect(a, b);
@@ -565,9 +618,326 @@ void test_unknown_restored_source_is_busy() {
     const char* bodyText = "{\"req\":\"123456789abcdef0123456789abcdef0\",\"text\":\"beta\"}";
     JsonReader body(bodyText, strlen(bodyText));
     b.game.onNet(offer, body);
-    TEST_ASSERT_EQUAL_STRING("alpha", b.game.leftWord());
+    assertSentence(b.game, {"beta", "alpha"});
+    TEST_ASSERT_EQUAL_UINT8(0, b.game.sentence().cursor());
+    TEST_ASSERT_EQUAL(WordGame::Status::ReceivedLeft, b.game.status());
+    TEST_ASSERT_EQUAL_UINT32(1, b.game.receivedTransfers());
+}
+
+void test_positioned_pull_order_and_cursor_from_each_side() {
+    Device a(randomA);
+    Device b(randomB);
+    connect(a, b);
+    uint32_t now = 0;
+    beginPair(a, b, now);
+    run(a, b, now, 1000);
+    Sentence initial = makeSentence({"alpha", "omega"});
+    a.game.restoreSentence(initial, false);
+    b.game.restoreSentence(initial, false);
+
+    std::string fromRight = b.game.currentWord();
+    requestPull(a.game, now);
+    TEST_ASSERT_FALSE(a.game.insertAfter());
+    run(a, b, now, 1600);
+    assertSentence(a.game, {fromRight, "alpha", "omega"});
+    TEST_ASSERT_EQUAL_UINT8(0, a.game.sentence().cursor());
+    TEST_ASSERT_EQUAL_UINT32(1, a.game.receivedTransfers());
+    TEST_ASSERT_FALSE(a.game.pullPending());
+    TEST_ASSERT_FALSE(b.game.transferPending());
+    TEST_ASSERT_STR_NE(fromRight.c_str(), b.game.currentWord());
+
+    std::string fromLeft = a.game.currentWord();
+    requestPull(b.game, now, true);
+    run(a, b, now, 1600);
+    assertSentence(b.game, {"alpha", fromLeft, "omega"});
+    TEST_ASSERT_EQUAL_UINT8(1, b.game.sentence().cursor());
+    TEST_ASSERT_EQUAL_UINT32(1, b.game.receivedTransfers());
+    TEST_ASSERT_FALSE(b.game.pullPending());
+    TEST_ASSERT_FALSE(a.game.transferPending());
+    TEST_ASSERT_STR_NE(fromLeft.c_str(), a.game.currentWord());
+}
+
+void test_sentence_cursor_delete_confirm_cancel_and_clear() {
+    Device a(randomA);
+    uint32_t now = 0;
+    Identity ai = identity("0000000000000001", "00000000000000a1");
+    TEST_ASSERT_TRUE(a.game.begin(ai, now));
+    a.game.restoreSentence(makeSentence({"alpha", "beta", "omega"}, 1), false);
+    TEST_ASSERT_EQUAL_UINT8(1, a.game.sentence().cursor());
+    a.game.turnEncoder(1, now);
+    TEST_ASSERT_EQUAL_UINT8(2, a.game.sentence().cursor());
+    a.game.turnEncoder(1, now);
+    TEST_ASSERT_EQUAL_UINT8(0, a.game.sentence().cursor());
+    a.game.turnEncoder(-1, now);
+    TEST_ASSERT_EQUAL_UINT8(2, a.game.sentence().cursor());
+
+    a.game.pressConfirm(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::DeleteConfirm, a.game.editMode());
+    a.game.pressRefresh(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::Navigate, a.game.editMode());
+    assertSentence(a.game, {"alpha", "beta", "omega"});
+    TEST_ASSERT_EQUAL_UINT8(2, a.game.sentence().cursor());
+    a.game.pressConfirm(now);
+    a.game.pressConfirm(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::Navigate, a.game.editMode());
+    assertSentence(a.game, {"alpha", "beta"});
+    TEST_ASSERT_EQUAL_UINT8(1, a.game.sentence().cursor());
+    a.game.pressRefresh(now);
+    TEST_ASSERT_EQUAL(WordGame::View::Picker, a.game.view());
+    TEST_ASSERT_TRUE(a.game.sentence().empty());
+}
+
+void test_empty_sentence_can_pull() {
+    Device a(randomA);
+    Device b(randomB);
+    connect(a, b);
+    uint32_t now = 0;
+    beginPair(a, b, now);
+    run(a, b, now, 1000);
+    a.game.restoreSentence(makeSentence({"seed"}), false);
+    disconnect(a, b);
+    run(a, b, now, 3500);
+    a.game.pressConfirm(now);
+    a.game.pressConfirm(now);
+    TEST_ASSERT_TRUE(a.game.sentence().empty());
+    TEST_ASSERT_EQUAL(WordGame::View::Sentence, a.game.view());
+
+    connect(a, b);
+    run(a, b, now, 1000);
+    std::string offered = b.game.currentWord();
+    requestPull(a.game, now);
+    run(a, b, now, 1600);
+    assertSentence(a.game, {offered});
+    TEST_ASSERT_EQUAL_UINT8(0, a.game.sentence().cursor());
+    TEST_ASSERT_EQUAL_UINT32(1, a.game.receivedTransfers());
+    TEST_ASSERT_FALSE(a.game.pullPending());
+    TEST_ASSERT_STR_NE(offered.c_str(), b.game.currentWord());
+}
+
+void test_hotplug_preserves_pull_request_without_duplicate() {
+    Device a(randomA);
+    Device b(randomB);
+    connect(a, b);
+    uint32_t now = 0;
+    beginPair(a, b, now);
+    run(a, b, now, 1000);
+    a.game.restoreSentence(makeSentence({"alpha"}), false);
+    std::string offered = b.game.currentWord();
+    a.right.dropNextPull = true;
+    requestPull(a.game, now);
+    std::string request = a.game.pendingPullRequest();
+    TEST_ASSERT_FALSE(request.empty());
+    disconnect(a, b);
+    run(a, b, now, 3500);
+    TEST_ASSERT_TRUE(a.game.pullPending());
+    TEST_ASSERT_EQUAL_STRING(request.c_str(), a.game.pendingPullRequest());
+    TEST_ASSERT_EQUAL_STRING(offered.c_str(), b.game.currentWord());
+    TEST_ASSERT_EQUAL_UINT32(0, b.game.receivedTransfers());
+    assertSentence(a.game, {"alpha"});
+
+    connect(a, b);
+    run(a, b, now, 1800);
+    assertSentence(a.game, {offered, "alpha"});
+    TEST_ASSERT_EQUAL_UINT32(1, a.game.receivedTransfers());
+    TEST_ASSERT_FALSE(a.game.pullPending());
+    TEST_ASSERT_TRUE(a.right.pulls >= 2);
+    run(a, b, now, 1500);
+    assertSentence(a.game, {offered, "alpha"});
+    TEST_ASSERT_EQUAL_UINT32(1, a.game.receivedTransfers());
+}
+
+void test_positioned_pull_lost_accept_is_idempotent() {
+    Device a(randomA);
+    Device b(randomB);
+    connect(a, b);
+    uint32_t now = 0;
+    beginPair(a, b, now);
+    run(a, b, now, 1000);
+    a.game.restoreSentence(makeSentence({"alpha", "omega"}, 1), false);
+    std::string offered = b.game.currentWord();
+    a.right.dropNextAccept = true;
+    requestPull(a.game, now, true);
+    run(a, b, now, 1800);
+    assertSentence(a.game, {"alpha", "omega", offered});
+    TEST_ASSERT_EQUAL_UINT8(2, a.game.sentence().cursor());
+    TEST_ASSERT_EQUAL_UINT32(1, a.game.receivedTransfers());
+    TEST_ASSERT_FALSE(a.game.pullPending());
+    TEST_ASSERT_FALSE(b.game.transferPending());
+    TEST_ASSERT_EQUAL_UINT32(1, a.right.droppedAccepts);
+    TEST_ASSERT_EQUAL_UINT32(2, a.right.accepts);
+    TEST_ASSERT_EQUAL_UINT32(1, b.left.offers);
+    TEST_ASSERT_STR_NE(offered.c_str(), b.game.currentWord());
+}
+
+void test_sentence_capacity_and_position_bounds() {
+    Sentence direct;
+    TEST_ASSERT_FALSE(direct.insert(1, "bad", ""));
+    TEST_ASSERT_TRUE(direct.insert(0, "alpha", ""));
+    TEST_ASSERT_FALSE(direct.insert(2, "bad", ""));
+    TEST_ASSERT_FALSE(direct.remove(1));
+    direct.clear();
+    std::vector<std::string> full;
+    for (unsigned i = 0; i < Sentence::MAX_WORDS; ++i) {
+        char word[16];
+        snprintf(word, sizeof(word), "w%02u", i);
+        full.emplace_back(word);
+        TEST_ASSERT_TRUE(direct.insert(direct.count(), word, ""));
+    }
+    TEST_ASSERT_EQUAL_UINT8(Sentence::MAX_WORDS, direct.count());
+    TEST_ASSERT_FALSE(direct.insert(0, "overflow", ""));
+    TEST_ASSERT_FALSE(direct.insert(Sentence::MAX_WORDS + 1, "overflow", ""));
+    TEST_ASSERT_FALSE(direct.remove(Sentence::MAX_WORDS));
+    for (unsigned i = 0; i < full.size(); ++i) {
+        TEST_ASSERT_EQUAL_STRING(full[i].c_str(), direct.text(i));
+    }
+
+    Device a(randomA);
+    Device b(randomB);
+    connect(a, b);
+    uint32_t now = 0;
+    beginPair(a, b, now);
+    run(a, b, now, 1000);
+    b.game.restoreSentence(makeSentence({"alpha"}), false);
+    NetMessage invalidPosition = testMessage(a, b, Port::Left, "WORD_OFFER",
+        "11111111111111111111111111111111", "beta");
+    const char* invalidText =
+        "{\"req\":\"11111111111111111111111111111111\",\"text\":\"beta\",\"pos\":2}";
+    JsonReader invalidBody(invalidText, strlen(invalidText));
+    b.game.onNet(invalidPosition, invalidBody);
+    assertSentence(b.game, {"alpha"});
     TEST_ASSERT_EQUAL(WordGame::Status::SlotBusy, b.game.status());
     TEST_ASSERT_EQUAL_UINT32(0, b.game.receivedTransfers());
+
+    b.game.restoreSentence(makeSentence(full), false);
+    b.game.pressConfirm(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::Navigate, b.game.editMode());
+    TEST_ASSERT_FALSE(b.game.pullPending());
+    TEST_ASSERT_EQUAL(WordGame::Status::SlotBusy, b.game.status());
+    NetMessage fullOffer = testMessage(a, b, Port::Left, "WORD_OFFER",
+        "22222222222222222222222222222222", "overflow");
+    const char* fullText =
+        "{\"req\":\"22222222222222222222222222222222\",\"text\":\"overflow\",\"pos\":0}";
+    JsonReader fullBody(fullText, strlen(fullText));
+    b.game.onNet(fullOffer, fullBody);
+    assertSentence(b.game, full);
+    TEST_ASSERT_EQUAL(WordGame::Status::SlotBusy, b.game.status());
+    TEST_ASSERT_EQUAL_UINT32(0, b.game.receivedTransfers());
+}
+
+void test_restore_sentence_cursor_order_and_replay_tombstone() {
+    Device a(randomA);
+    Device b(randomB);
+    connect(a, b);
+    uint32_t now = 0;
+    beginPair(a, b, now);
+    run(a, b, now, 1000);
+    Sentence saved;
+    TEST_ASSERT_TRUE(saved.insert(0, "alpha", a.node.identity().id));
+    TEST_ASSERT_TRUE(saved.insert(1, "beta", b.node.identity().id));
+    TEST_ASSERT_TRUE(saved.insert(2, "omega", ""));
+    saved.setCursor(1);
+    WordGame::ReceiptState tombstone = {};
+    snprintf(tombstone.src, sizeof(tombstone.src), "%s", a.node.identity().id);
+    snprintf(tombstone.boot, sizeof(tombstone.boot), "%s", a.node.identity().boot);
+    snprintf(tombstone.req, sizeof(tombstone.req), "33333333333333333333333333333333");
+    snprintf(tombstone.text, sizeof(tombstone.text), "ghost");
+    tombstone.side = 0;
+    tombstone.positioned = true;
+    tombstone.position = 1;
+    tombstone.completed = 1;
+    tombstone.order = 7;
+    b.game.restoreSentence(saved, true, &tombstone, 1);
+    assertSentence(b.game, {"alpha", "beta", "omega"});
+    TEST_ASSERT_EQUAL_UINT8(1, b.game.sentence().cursor());
+    TEST_ASSERT_TRUE(b.game.confirmed());
+    TEST_ASSERT_EQUAL_STRING(a.node.identity().id, b.game.sentence().source(0));
+    TEST_ASSERT_EQUAL_STRING(b.node.identity().id, b.game.sentence().source(1));
+
+    b.game.pressRefresh(now);
+    TEST_ASSERT_FALSE(b.game.hasSentence());
+    NetMessage replay = testMessage(a, b, Port::Left, "WORD_OFFER",
+                                    tombstone.req, tombstone.text);
+    const char* replayText =
+        "{\"req\":\"33333333333333333333333333333333\",\"text\":\"ghost\",\"pos\":1}";
+    JsonReader replayBody(replayText, strlen(replayText));
+    b.game.onNet(replay, replayBody);
+    TEST_ASSERT_EQUAL_UINT32(0, b.game.receivedTransfers());
+    TEST_ASSERT_FALSE(b.game.hasSentence());
+    TEST_ASSERT_EQUAL(WordGame::View::Picker, b.game.view());
+}
+
+void test_simultaneous_bidirectional_positioned_pulls() {
+    Device a(randomA);
+    Device b(randomB);
+    connect(a, b);
+    uint32_t now = 0;
+    beginPair(a, b, now);
+    run(a, b, now, 1000);
+    a.game.restoreSentence(makeSentence({"a0", "a1"}), false);
+    b.game.restoreSentence(makeSentence({"b0", "b1"}, 1), false);
+    std::string aOffer = a.game.currentWord();
+    std::string bOffer = b.game.currentWord();
+    requestPull(a.game, now);
+    requestPull(b.game, now, true);
+    run(a, b, now, 1800);
+    assertSentence(a.game, {bOffer, "a0", "a1"});
+    assertSentence(b.game, {"b0", "b1", aOffer});
+    TEST_ASSERT_EQUAL_UINT8(0, a.game.sentence().cursor());
+    TEST_ASSERT_EQUAL_UINT8(2, b.game.sentence().cursor());
+    TEST_ASSERT_EQUAL_UINT32(1, a.game.receivedTransfers());
+    TEST_ASSERT_EQUAL_UINT32(1, b.game.receivedTransfers());
+    TEST_ASSERT_FALSE(a.game.pullPending());
+    TEST_ASSERT_FALSE(b.game.pullPending());
+    TEST_ASSERT_FALSE(a.game.transferPending());
+    TEST_ASSERT_FALSE(b.game.transferPending());
+    TEST_ASSERT_STR_NE(aOffer.c_str(), a.game.currentWord());
+    TEST_ASSERT_STR_NE(bOffer.c_str(), b.game.currentWord());
+}
+
+void test_insert_mode_disconnect_and_cancel_return_to_navigation() {
+    Device a(randomA);
+    Device b(randomB);
+    connect(a, b);
+    uint32_t now = 0;
+    beginPair(a, b, now);
+    run(a, b, now, 1000);
+    b.game.restoreSentence(makeSentence({"alpha", "beta"}), false);
+    b.game.pressConfirm(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::InsertSide, b.game.editMode());
+    disconnect(a, b);
+    run(a, b, now, 3500);
+    TEST_ASSERT_EQUAL(SentenceEdit::Navigate, b.game.editMode());
+    b.game.pressConfirm(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::DeleteConfirm, b.game.editMode());
+    b.game.pressRefresh(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::Navigate, b.game.editMode());
+
+    connect(a, b);
+    run(a, b, now, 1000);
+    b.game.pressConfirm(now);
+    b.game.pressConfirm(now);
+    TEST_ASSERT_TRUE(b.game.pullPending());
+    b.game.pressRefresh(now);
+    TEST_ASSERT_FALSE(b.game.pullPending());
+    TEST_ASSERT_EQUAL(SentenceEdit::Navigate, b.game.editMode());
+}
+
+void test_remote_candidate_change_requests_display() {
+    Device a(randomA);
+    Device b(randomB);
+    connect(a, b);
+    uint32_t now = 0;
+    beginPair(a, b, now);
+    run(a, b, now, 1000);
+    b.game.restoreSentence(makeSentence({"alpha"}), false);
+    b.game.pressConfirm(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::InsertSide, b.game.editMode());
+    while (b.game.consumeDisplayRequest()) {}
+    std::string before = b.game.remote(Port::Left).text;
+    a.game.pressRefresh(now);
+    run(a, b, now, 100);
+    TEST_ASSERT_STR_NE(before.c_str(), b.game.remote(Port::Left).text);
+    TEST_ASSERT_TRUE(b.game.consumeDisplayRequest());
 }
 
 void test_incomplete_receipts_are_not_evicted() {
@@ -619,8 +989,18 @@ void runGameTests() {
     RUN_TEST(test_simultaneous_bidirectional_transfer_keeps_sentence);
     RUN_TEST(test_error_requires_pending_peer);
     RUN_TEST(test_cancel_requests_save);
-    RUN_TEST(test_reversed_reconnect_migrates_receipt);
+    RUN_TEST(test_reversed_reconnect_keeps_word_position);
     RUN_TEST(test_restored_receipt_blocks_replay_after_clear);
-    RUN_TEST(test_unknown_restored_source_is_busy);
+    RUN_TEST(test_unknown_restored_source_appends_without_overwrite);
+    RUN_TEST(test_positioned_pull_order_and_cursor_from_each_side);
+    RUN_TEST(test_sentence_cursor_delete_confirm_cancel_and_clear);
+    RUN_TEST(test_empty_sentence_can_pull);
+    RUN_TEST(test_hotplug_preserves_pull_request_without_duplicate);
+    RUN_TEST(test_positioned_pull_lost_accept_is_idempotent);
+    RUN_TEST(test_sentence_capacity_and_position_bounds);
+    RUN_TEST(test_restore_sentence_cursor_order_and_replay_tombstone);
+    RUN_TEST(test_simultaneous_bidirectional_positioned_pulls);
+    RUN_TEST(test_insert_mode_disconnect_and_cancel_return_to_navigation);
+    RUN_TEST(test_remote_candidate_change_requests_display);
     RUN_TEST(test_incomplete_receipts_are_not_evicted);
 }

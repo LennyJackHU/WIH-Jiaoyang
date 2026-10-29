@@ -10,15 +10,15 @@ struct PersistState {
     uint8_t cur;
     uint8_t last;
     uint8_t confirmed;
-    char leftWord[wlp2::TEXT_MAX + 1];
-    char rightWord[wlp2::TEXT_MAX + 1];
-    char leftSource[17];
-    char rightSource[17];
+    uint8_t sentenceCount;
+    uint8_t sentenceCursor;
+    char sentenceWords[Sentence::MAX_WORDS][wlp2::TEXT_MAX + 1];
+    char sentenceSources[Sentence::MAX_WORDS][17];
     uint8_t receiptCount;
     WordGame::ReceiptState receipts[8];
 };
 
-#define STATE_MAGIC 0x57494833u // "WIH3"
+#define STATE_MAGIC 0x57494834u // "WIH4"
 
 // NVS (flash) persistence - survives power cycles.
 bool storageLoadNvs(PersistState& out);
