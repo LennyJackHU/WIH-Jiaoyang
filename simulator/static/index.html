@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WIH 双板句子编辑器模拟器</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">ESP32-S3 · A/B 双板</p>
+      <h1>WIH 句子编辑器模拟器</h1>
+      <p class="subtitle">用电脑输入候选词，模拟连接、双确认传词与句子组装。</p>
+    </div>
+    <div class="global-controls">
+      <button id="connection" class="primary" type="button">连接 A.R ↔ B.L</button>
+      <button id="step" type="button">重试等待中的传输</button>
+      <button id="reset" class="quiet" type="button">重置</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="instructions" aria-label="操作说明">
+      <strong>基本流程</strong>
+      <span>设置候选词 → 连接双板 → 在发送板按两次 A。对方可接收时会自动发送、入句并确认，无需手动推进。</span>
+      <span>句子板按 A 进入 InsertSide，B 切换 BEFORE/AFTER，再按 A 自动完成定位 pull。断线、满句或冲突时保留 pending，可用重试按钮继续。</span>
+    </section>
+    <p id="error" class="error" role="alert" hidden></p>
+
+    <div class="boards">
+      <section class="board" data-board="A" aria-labelledby="title-a">
+        <div class="board-heading">
+          <div>
+            <p class="eyebrow">BOARD</p>
+            <h2 id="title-a">板 A <span class="port">R 口</span></h2>
+          </div>
+          <span class="link-badge" data-field="link">未连接</span>
+        </div>
+
+        <div class="screen" data-field="screen">
+          <div class="screen-status" data-field="status">READY</div>
+          <div data-field="picker">
+            <div class="picker-line adjacent" data-field="previous">—</div>
+            <div class="picker-line current" data-field="candidate-display"></div>
+            <div class="picker-line adjacent" data-field="next">—</div>
+            <div class="screen-footer">A:确认/发送　B:刷新/取消</div>
+          </div>
+          <div data-field="sentence-view" hidden>
+            <div class="sentence" data-field="sentence"></div>
+            <div class="delete-prompt" data-field="delete-prompt" hidden>delete? y/n　<strong>A:YES　B:NO</strong></div>
+            <div class="screen-footer" data-field="sentence-footer">ROTATE:SELECT　A:DEL/PULL　B:CANCEL</div>
+          </div>
+          <div data-field="insert-view" hidden>
+            <div class="insert-content">
+              <span class="candidate-label">CANDIDATE · 对端当前候选</span>
+              <strong class="remote-candidate" data-field="remote-candidate"></strong>
+              <div class="side-option" data-field="before">L:BEFORE <small>插到 cursor 词之前</small></div>
+              <div class="side-option" data-field="after">R:AFTER <small>插到 cursor 词之后</small></div>
+            </div>
+            <div class="screen-footer">A:INSERT　B:L/R</div>
+          </div>
+        </div>
+
+        <div class="state-grid">
+          <div><span>视图 / 模式</span><strong data-field="mode">Picker</strong></div>
+          <div><span>cursor / 词数</span><strong data-field="cursor">— / 0</strong></div>
+          <div><span>确认</span><strong data-field="confirmed">否</strong></div>
+          <div><span>连接</span><strong data-field="connection-detail">A.R 断开</strong></div>
+        </div>
+        <div class="pending" data-field="pending" hidden></div>
+
+        <form class="candidate-form" data-form="candidate">
+          <label for="candidate-a">电脑设置 A 的候选词</label>
+          <div class="input-row">
+            <input id="candidate-a" name="candidate" type="text" autocomplete="off" placeholder="输入中文或其他 UTF-8 文本" required>
+            <button type="submit">设置</button>
+          </div>
+          <small>非空、无控制字符，最多 96 个 UTF-8 字节</small>
+        </form>
+        <div class="board-controls" aria-label="板 A 硬件控制">
+          <button type="button" data-action="encoder" data-steps="-1">编码器 −</button>
+          <button type="button" data-action="encoder" data-steps="1">编码器 ＋</button>
+          <button type="button" class="button-a" data-action="confirm">A 按钮</button>
+          <button type="button" class="button-b" data-action="refresh">B 按钮</button>
+        </div>
+      </section>
+
+      <section class="board" data-board="B" aria-labelledby="title-b">
+        <div class="board-heading">
+          <div>
+            <p class="eyebrow">BOARD</p>
+            <h2 id="title-b">板 B <span class="port">L 口</span></h2>
+          </div>
+          <span class="link-badge" data-field="link">未连接</span>
+        </div>
+
+        <div class="screen" data-field="screen">
+          <div class="screen-status" data-field="status">READY</div>
+          <div data-field="picker">
+            <div class="picker-line adjacent" data-field="previous">—</div>
+            <div class="picker-line current" data-field="candidate-display"></div>
+            <div class="picker-line adjacent" data-field="next">—</div>
+            <div class="screen-footer">A:确认/发送　B:刷新/取消</div>
+          </div>
+          <div data-field="sentence-view" hidden>
+            <div class="sentence" data-field="sentence"></div>
+            <div class="delete-prompt" data-field="delete-prompt" hidden>delete? y/n　<strong>A:YES　B:NO</strong></div>
+            <div class="screen-footer" data-field="sentence-footer">ROTATE:SELECT　A:DEL/PULL　B:CANCEL</div>
+          </div>
+          <div data-field="insert-view" hidden>
+            <div class="insert-content">
+              <span class="candidate-label">CANDIDATE · 对端当前候选</span>
+              <strong class="remote-candidate" data-field="remote-candidate"></strong>
+              <div class="side-option" data-field="before">L:BEFORE <small>插到 cursor 词之前</small></div>
+              <div class="side-option" data-field="after">R:AFTER <small>插到 cursor 词之后</small></div>
+            </div>
+            <div class="screen-footer">A:INSERT　B:L/R</div>
+          </div>
+        </div>
+
+        <div class="state-grid">
+          <div><span>视图 / 模式</span><strong data-field="mode">Picker</strong></div>
+          <div><span>cursor / 词数</span><strong data-field="cursor">— / 0</strong></div>
+          <div><span>确认</span><strong data-field="confirmed">否</strong></div>
+          <div><span>连接</span><strong data-field="connection-detail">B.L 断开</strong></div>
+        </div>
+        <div class="pending" data-field="pending" hidden></div>
+
+        <form class="candidate-form" data-form="candidate">
+          <label for="candidate-b">电脑设置 B 的候选词</label>
+          <div class="input-row">
+            <input id="candidate-b" name="candidate" type="text" autocomplete="off" placeholder="输入中文或其他 UTF-8 文本" required>
+            <button type="submit">设置</button>
+          </div>
+          <small>非空、无控制字符，最多 96 个 UTF-8 字节</small>
+        </form>
+        <div class="board-controls" aria-label="板 B 硬件控制">
+          <button type="button" data-action="encoder" data-steps="-1">编码器 −</button>
+          <button type="button" data-action="encoder" data-steps="1">编码器 ＋</button>
+          <button type="button" class="button-a" data-action="confirm">A 按钮</button>
+          <button type="button" class="button-b" data-action="refresh">B 按钮</button>
+        </div>
+      </section>
+    </div>
+
+    <section class="log-panel" aria-labelledby="log-title">
+      <div class="log-heading">
+        <div>
+          <p class="eyebrow">DETERMINISTIC EVENTS</p>
+          <h2 id="log-title">操作与传输日志</h2>
+        </div>
+        <span>最新操作在前 · 最多保留 200 条</span>
+      </div>
+      <ol id="log" class="log" aria-live="polite"></ol>
+    </section>
+  </main>
+
+  <footer>本模拟器不实现真实 WLP2 帧或硬件时序；界面状态转移遵循句子编辑器模型。</footer>
+</body>
+</html>

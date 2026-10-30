@@ -1,10 +1,9 @@
 #include "picker.h"
-#include <esp_random.h>
 
 int16_t Picker::randomAvoiding(int16_t a, int16_t b) {
     int16_t idx;
     do {
-        idx = (int16_t)(esp_random() % WORD_COUNT);
+        idx = (int16_t)(random_() % WORD_COUNT);
     } while (idx == a || idx == b);
     return idx;
 }
@@ -26,7 +25,7 @@ void Picker::ensureNext() {
 
 void Picker::init() {
     first = cur = last = 0;
-    append((int16_t)(esp_random() % WORD_COUNT)); // prev
+    append((int16_t)(random_() % WORD_COUNT));
     append(randomAvoiding(hist[0], -1));          // cur
     cur = 1;
     ensureNext();
@@ -54,7 +53,8 @@ void Picker::stepBackward() {
 
 void Picker::refreshRandom() {
     int16_t prev = hasPrev() ? hist[(cur + HISTORY_LEN - 1) % HISTORY_LEN] : -1;
-    hist[cur] = randomAvoiding(prev, -1);
+    int16_t old = hist[cur];
+    hist[cur] = randomAvoiding(prev, old);
     // drop any lookahead and regenerate it against the new current word
     last = (uint8_t)((cur + 1) % HISTORY_LEN);
     if (last == first) {

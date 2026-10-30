@@ -9,3 +9,6 @@ void inputInit();
 // Hardware PCNT keeps counting while the display blocks.
 int inputReadEncoderSteps();
 BtnEvent inputPollButtons();
+
+// Level (0/1) that means "pressed" for the given button pin.
+int inputPressedLevel(uint8_t pin);
