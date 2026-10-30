@@ -2,6 +2,7 @@
 
 #include <esp_random.h>
 #include "config.h"
+#include "storage.h"
 
 int UartBytePort::read() {
     return serial_.available() ? serial_.read() : -1;
@@ -49,16 +50,12 @@ bool wlp2UartInit() {
 void wlp2MakeIdentity(wlp2::Identity& identity) {
     memset(&identity, 0, sizeof(identity));
     unsigned long long mac = ESP.getEfuseMac();
-    snprintf(identity.id, sizeof(identity.id), "0000%012llx", mac);
+    snprintf(identity.fingerprint, sizeof(identity.fingerprint), "0000%012llx", mac);
+    if (!storageLoadNodeId(identity.id, sizeof(identity.id))) {
+        snprintf(identity.id, sizeof(identity.id), "%s", identity.fingerprint);
+    }
     uint64_t boot = (static_cast<uint64_t>(esp_random()) << 32) | esp_random();
     snprintf(identity.boot, sizeof(identity.boot), "%016llx",
              static_cast<unsigned long long>(boot));
     snprintf(identity.kit, sizeof(identity.kit), "%s", WIH_KIT_ID);
-    snprintf(identity.recorder, sizeof(identity.recorder), "%s", WIH_RECORDER_ID);
-    identity.role = strcmp(identity.id, identity.recorder) == 0
-        ? wlp2::Role::Recorder : wlp2::Role::Word;
-    identity.members[0] = WIH_MEMBER_1_ID;
-    identity.members[1] = WIH_MEMBER_2_ID;
-    identity.members[2] = WIH_MEMBER_3_ID;
-    identity.memberCount = 3;
 }

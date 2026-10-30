@@ -97,25 +97,19 @@ struct Device {
     explicit Device(RandomFn random) : node(&left, &right, recorder, random) {}
 };
 
-Identity identity(const char* id, const char* boot, Role role = Role::Word) {
-    static const char* members[] = {
-        "0000000000000001", "0000000000000002", "0000000000000003"
-    };
+Identity identity(const char* id, const char* boot) {
     Identity value = {};
     snprintf(value.id, sizeof(value.id), "%s", id);
     snprintf(value.boot, sizeof(value.boot), "%s", boot);
     snprintf(value.kit, sizeof(value.kit), "%s", "0123456789abcdef0123456789abcdef");
-    snprintf(value.recorder, sizeof(value.recorder), "%s", "0000000000000003");
-    value.role = role;
-    for (unsigned i = 0; i < 3; ++i) value.members[i] = members[i];
-    value.memberCount = 3;
+    snprintf(value.fingerprint, sizeof(value.fingerprint), "%s", id);
     return value;
 }
 
 Identity identityFor(unsigned number) {
     if (number == 1) return identity("0000000000000001", "00000000000000a1");
     if (number == 2) return identity("0000000000000002", "00000000000000b1");
-    return identity("0000000000000003", "00000000000000c1", Role::Recorder);
+    return identity("0000000000000003", "00000000000000c1");
 }
 
 void connect(Device& a, Device& b) {
@@ -329,7 +323,7 @@ std::vector<uint8_t> craftedNet(const Identity& source, const Identity& target,
     snprintf(req, sizeof(req), "123456789abcdef0123456789abcdef0");
     JsonWriter out(json, sizeof(json));
     out.beginObject();
-    out.fieldUInt("v", 2);
+    out.fieldUInt("v", PROTOCOL_VERSION);
     out.fieldString("t", "NET");
     out.fieldString("sid", sid);
     out.fieldUInt("tx", tx);

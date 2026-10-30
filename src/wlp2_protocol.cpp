@@ -31,8 +31,9 @@ bool timeReached(uint32_t now, uint32_t then, uint32_t interval) {
 
 } // namespace
 
-Node::Node(BytePort* left, BytePort* right, Handler& handler, RandomFn random)
-    : ports_{left, right}, handler_(&handler), random_(random) {
+Node::Node(BytePort* left, BytePort* right, Handler& handler, RandomFn random,
+           IdChangedFn idChanged)
+    : ports_{left, right}, handler_(&handler), random_(random), idChanged_(idChanged) {
     memset(state_, 0, sizeof(state_));
     for (unsigned i = 0; i < 2; ++i) {
         state_[i].io = ports_[i];
@@ -55,22 +56,6 @@ const char* Node::portName(Port port) {
     return port == Port::Left ? "L" : port == Port::Right ? "R" : "?";
 }
 
-bool Node::parseRole(const char* text, Role& role) {
-    if (strcmp(text, "WORD") == 0) {
-        role = Role::Word;
-        return true;
-    }
-    if (strcmp(text, "RECORDER") == 0) {
-        role = Role::Recorder;
-        return true;
-    }
-    return false;
-}
-
-const char* Node::roleName(Role role) {
-    return role == Role::Recorder ? "RECORDER" : "WORD";
-}
-
 void Node::randomHex(char* out, size_t digits) {
     static const char digits16[] = "0123456789abcdef";
     for (size_t i = 0; i < digits; ++i) {
@@ -87,27 +72,9 @@ void Node::randomHex(char* out, size_t digits) {
 bool Node::begin(const Identity& identity, uint32_t now) {
     configured_ = false;
     if (!random_ || !validHex(identity.id, 16) || !validHex(identity.boot, 16) ||
-        !validHex(identity.kit, 32) || !validHex(identity.recorder, 16) ||
-        identity.memberCount == 0 || identity.memberCount > 3 ||
-        ((identity.role == Role::Recorder) != (strcmp(identity.id, identity.recorder) == 0))) {
-        return false;
-    }
+        !validHex(identity.kit, 32) || !validHex(identity.fingerprint, 16) ||
+        strcmp(identity.id, "0000000000000000") == 0) return false;
     identity_ = identity;
-    bool selfListed = false;
-    bool recorderListed = false;
-    for (unsigned i = 0; i < identity.memberCount; ++i) {
-        if (!validHex(identity.members[i], 16)) return false;
-        copyText(members_[i], sizeof(members_[i]), identity.members[i]);
-        for (unsigned j = 0; j < i; ++j) {
-            if (strcmp(members_[i], members_[j]) == 0) return false;
-        }
-        selfListed |= strcmp(identity.id, members_[i]) == 0;
-        recorderListed |= strcmp(identity.recorder, members_[i]) == 0;
-    }
-    if (!selfListed || !recorderListed) return false;
-    identity_.members[0] = members_[0];
-    identity_.members[1] = members_[1];
-    identity_.members[2] = members_[2];
     topoRev_ = 0;
     nextSeq_ = 1;
     inboundCount_ = 0;
@@ -133,16 +100,14 @@ bool Node::begin(const Identity& identity, uint32_t now) {
 
 bool Node::parseHello(const JsonReader& json, Hello& hello, char* echo, size_t echoCap) const {
     char port[2];
-    char role[10];
     uint32_t version;
-    if (!json.getUInt("v", version) || version != 2 ||
+    if (!json.getUInt("v", version) || version != PROTOCOL_VERSION ||
         !json.getString("id", hello.id, sizeof(hello.id)) ||
         !json.getString("boot", hello.boot, sizeof(hello.boot)) ||
         !json.getString("nonce", hello.nonce, sizeof(hello.nonce)) ||
         !json.getString("kit", hello.kit, sizeof(hello.kit)) ||
-        !json.getString("recorder", hello.recorder, sizeof(hello.recorder)) ||
-        !json.getString("port", port, sizeof(port)) ||
-        !json.getString("role", role, sizeof(role)) || !parseRole(role, hello.role)) return false;
+        !json.getString("fp", hello.fingerprint, sizeof(hello.fingerprint)) ||
+        !json.getString("port", port, sizeof(port))) return false;
     if (strcmp(port, "L") == 0) hello.port = Port::Left;
     else if (strcmp(port, "R") == 0) hello.port = Port::Right;
     else return false;
@@ -152,21 +117,39 @@ bool Node::parseHello(const JsonReader& json, Hello& hello, char* echo, size_t e
     }
     return validHex(hello.id, 16) && validHex(hello.boot, 16) &&
            validHex(hello.nonce, 16) && validHex(hello.kit, 32) &&
-           validHex(hello.recorder, 16);
+           validHex(hello.fingerprint, 16) && strcmp(hello.id, "0000000000000000") != 0;
 }
 
 bool Node::identityAllowed(const Hello& hello, Port localPort) const {
-    if (!configured_ || strcmp(hello.id, identity_.id) == 0 ||
-        strcmp(hello.kit, identity_.kit) != 0 ||
-        strcmp(hello.recorder, identity_.recorder) != 0 ||
-        hello.port != opposite(localPort) ||
-        ((hello.role == Role::Recorder) != (strcmp(hello.id, identity_.recorder) == 0))) {
-        return false;
+    return configured_ && strcmp(hello.id, identity_.id) != 0 &&
+           strcmp(hello.kit, identity_.kit) == 0 && hello.port == opposite(localPort);
+}
+
+void Node::reassignId(uint32_t now) {
+    char candidate[17];
+    do {
+        randomHex(candidate, 16);
+        if (strcmp(candidate, "0000000000000000") == 0 ||
+            strcmp(candidate, identity_.id) == 0) continue;
+        bool conflicts = false;
+        for (unsigned i = 0; i < 2; ++i) {
+            if (state_[i].peerSet && strcmp(candidate, state_[i].peer.id) == 0) {
+                conflicts = true;
+            }
+        }
+        if (!conflicts) break;
+    } while (true);
+    copyText(identity_.id, sizeof(identity_.id), candidate);
+    randomHex(identity_.boot, 16);
+    nextSeq_ = 1;
+    inboundCount_ = 0;
+    memset(dedup_, 0, sizeof(dedup_));
+    dedupNext_ = 0;
+    for (unsigned i = 0; i < 2; ++i) {
+        reset(static_cast<Port>(i), now, true);
+        state_[i].lastHello = now + (random_() % 250);
     }
-    for (unsigned i = 0; i < identity_.memberCount; ++i) {
-        if (strcmp(hello.id, members_[i]) == 0) return true;
-    }
-    return false;
+    if (idChanged_) idChanged_(identity_.id);
 }
 
 void Node::makeSid(PortState& port) {
@@ -252,15 +235,14 @@ void Node::emitHello(Port which) {
     if (!port.io) return;
     JsonWriter out(json_, sizeof(json_));
     out.beginObject();
-    out.fieldUInt("v", 2);
+    out.fieldUInt("v", PROTOCOL_VERSION);
     out.fieldString("t", "HELLO");
     out.fieldString("id", identity_.id);
     out.fieldString("boot", identity_.boot);
     out.fieldString("port", portName(which));
     out.fieldString("nonce", port.nonce);
     out.fieldString("kit", identity_.kit);
-    out.fieldString("recorder", identity_.recorder);
-    out.fieldString("role", roleName(identity_.role));
+    out.fieldString("fp", identity_.fingerprint);
     out.endObject();
     if (out.finish()) transmit(port);
 }
@@ -270,15 +252,14 @@ void Node::emitHelloAck(Port which) {
     if (!port.io || !port.peerSet) return;
     JsonWriter out(json_, sizeof(json_));
     out.beginObject();
-    out.fieldUInt("v", 2);
+    out.fieldUInt("v", PROTOCOL_VERSION);
     out.fieldString("t", "HELLO_ACK");
     out.fieldString("id", identity_.id);
     out.fieldString("boot", identity_.boot);
     out.fieldString("port", portName(which));
     out.fieldString("nonce", port.nonce);
     out.fieldString("kit", identity_.kit);
-    out.fieldString("recorder", identity_.recorder);
-    out.fieldString("role", roleName(identity_.role));
+    out.fieldString("fp", identity_.fingerprint);
     out.fieldString("echo", port.peer.nonce);
     out.endObject();
     if (out.finish()) transmit(port);
@@ -290,7 +271,7 @@ void Node::emitPing(Port which) {
     if (port.ping == 0) port.ping = 1;
     JsonWriter out(json_, sizeof(json_));
     out.beginObject();
-    out.fieldUInt("v", 2);
+    out.fieldUInt("v", PROTOCOL_VERSION);
     out.fieldString("t", "PING");
     out.fieldString("sid", port.sid);
     out.fieldUInt("n", port.ping);
@@ -302,7 +283,7 @@ void Node::emitPong(Port which, uint32_t n) {
     PortState& port = state_[index(which)];
     JsonWriter out(json_, sizeof(json_));
     out.beginObject();
-    out.fieldUInt("v", 2);
+    out.fieldUInt("v", PROTOCOL_VERSION);
     out.fieldString("t", "PONG");
     out.fieldString("sid", port.sid);
     out.fieldUInt("n", n);
@@ -314,7 +295,7 @@ void Node::emitLinkReply(Port which, const char* type, uint32_t tx, uint32_t ret
     PortState& port = state_[index(which)];
     JsonWriter out(json_, sizeof(json_));
     out.beginObject();
-    out.fieldUInt("v", 2);
+    out.fieldUInt("v", PROTOCOL_VERSION);
     out.fieldString("t", type);
     out.fieldString("sid", port.sid);
     out.fieldUInt("tx", tx);
@@ -407,18 +388,26 @@ void Node::receiveFrame(Port which) {
     JsonReader json(port.rxJson, port.rxLen);
     char type[16];
     uint32_t version;
-    if (!json.valid() || !json.getUInt("v", version) || version != 2 ||
+    if (!json.valid() || !json.getUInt("v", version) || version != PROTOCOL_VERSION ||
         !json.getString("t", type, sizeof(type))) return;
     if (strcmp(type, "HELLO") == 0 || strcmp(type, "HELLO_ACK") == 0) {
         Hello hello;
         char echo[17];
-        if (!parseHello(json, hello, echo, sizeof(echo)) || !identityAllowed(hello, which)) return;
+        if (!parseHello(json, hello, echo, sizeof(echo))) return;
+        if (strcmp(hello.id, identity_.id) == 0) {
+            if (strcmp(hello.fingerprint, identity_.fingerprint) != 0 &&
+                strcmp(hello.kit, identity_.kit) == 0 && hello.port == opposite(which)) {
+                reassignId(port.lastRxByte);
+            }
+            return;
+        }
+        if (!identityAllowed(hello, which)) return;
         bool changed = !port.peerSet || strcmp(port.peer.id, hello.id) != 0 ||
                        strcmp(port.peer.boot, hello.boot) != 0 ||
                        strcmp(port.peer.nonce, hello.nonce) != 0 ||
                        strcmp(port.peer.kit, hello.kit) != 0 ||
-                       strcmp(port.peer.recorder, hello.recorder) != 0 ||
-                       port.peer.port != hello.port || port.peer.role != hello.role;
+                       strcmp(port.peer.fingerprint, hello.fingerprint) != 0 ||
+                       port.peer.port != hello.port;
         if (changed) {
             reset(which, port.lastRxByte, false);
             port.peer = hello;
@@ -497,11 +486,7 @@ void Node::receiveNet(Port which, const JsonReader& frame, uint32_t now) {
         !net.getObject("body", body) || !validHex(message.src, 16) ||
         !validHex(message.boot, 16) || !validKind(message.kind) ||
         (strcmp(message.dst, "*") != 0 && !validHex(message.dst, 16))) return;
-    bool sourceListed = false;
-    for (unsigned i = 0; i < identity_.memberCount; ++i) {
-        sourceListed |= strcmp(message.src, members_[i]) == 0;
-    }
-    if (!sourceListed || strcmp(message.src, identity_.id) == 0) return;
+    if (strcmp(message.src, identity_.id) == 0) return;
     if (port.hasLastTx && tx == port.lastTx) {
         emitLinkReply(which, "LACK", tx);
         return;
@@ -567,7 +552,7 @@ bool Node::enqueueNet(Port which, const NetMessage& source, const char* body,
     uint32_t tx = port.nextTx;
     JsonWriter out(json_, sizeof(json_));
     out.beginObject();
-    out.fieldUInt("v", 2);
+    out.fieldUInt("v", PROTOCOL_VERSION);
     out.fieldString("t", "NET");
     out.fieldString("sid", port.sid);
     out.fieldUInt("tx", tx);

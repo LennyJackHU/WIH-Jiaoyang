@@ -170,3 +170,30 @@ bool storageSaveNvs(const PersistState& state) {
     prefs.end();
     return written == sizeof(copy);
 }
+
+bool storageLoadNodeId(char* out, size_t capacity) {
+    if (!out || capacity < 17) return false;
+    Preferences prefs;
+    if (!prefs.begin("wih", true)) return false;
+    if (!prefs.isKey("node_id")) {
+        prefs.end();
+        return false;
+    }
+    char id[17];
+    size_t len = prefs.getString("node_id", id, sizeof(id));
+    prefs.end();
+    if (len != 16 || !wlp2::validHex(id, 16) || strcmp(id, "0000000000000000") == 0) {
+        return false;
+    }
+    snprintf(out, capacity, "%s", id);
+    return true;
+}
+
+bool storageSaveNodeId(const char* id) {
+    if (!wlp2::validHex(id, 16) || strcmp(id, "0000000000000000") == 0) return false;
+    Preferences prefs;
+    if (!prefs.begin("wih", false)) return false;
+    size_t written = prefs.putString("node_id", id);
+    prefs.end();
+    return written == 16;
+}

@@ -12,7 +12,7 @@
 从仓库根目录运行：
 
 ```sh
-# 46 项固件核心 native 测试
+# 49 项固件核心 native 测试
 pio test -e native
 
 # 14 项 Web 模拟器模型与 HTTP 测试；仅需 Python 3 标准库
@@ -69,5 +69,5 @@ command -v pio
 
 - 无操作约 5 秒后只允许墨水屏 hibernate，不得调用 `esp_deep_sleep_start()`。MCU、UART、`game.tick()` 和周期 `alive` 日志必须持续运行。
 - 屏幕已休眠且 `dirty=false` 时直接返回，避免反复 `saveAll()` 写 NVS。连接、来词和本地输入要刷新空闲计时；下一次重绘先全刷，传输不等待屏幕恢复。
-- 修改→46 项 native+14 项 Web 测试→N8R8 构建→实板超过 5 秒持续监听验证→提交→推送→PR→另一块板同步提交并烧录→Pogo 验收，完整步骤见 `docs/hardware-sop.md`。
-- 当前双板 ID：第一板 `0000ac3a2a6b4580`，第二板 `0000683d2a6b4580`。两板必须使用一致的 kit/member/recorder 配置。
+- 修改→49 项 native+14 项 Web 测试→N8R8 构建→实板超过 5 秒持续监听验证→提交→推送→PR→另一块板同步提交并烧录→Pogo 验收，完整步骤见 `docs/hardware-sop.md`。
+- 不再配置 member/recorder 白名单。相同 `WIH_KIT_ID` 的陌生模块开放加入；HELLO v3 携带 MAC 指纹，冲突双方随机换号并通过 NVS `wih/node_id` 持久化，详见 `docs/open-join.md`。

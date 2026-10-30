@@ -119,7 +119,7 @@ Sentence/Navigate ──A，唯一且信息有效的直接邻居──► Senten
 
 ### 5.1 A 先主动传给 B，B 成为句子块
 
-1. 将 A 的 R 口接到 B 的 L 口，两板使用同一 kit、正确 member/recorder ID，等待握手和 `NODE_INFO` 邻接核对完成。
+1. 将 A 的 R 口接到 B 的 L 口，两板使用同一 kit 和 WLP2 v3，等待开放握手和 `NODE_INFO` 邻接核对完成；不需要 member 白名单。
 2. A 在 Picker 显示当前词 `alpha`，B 的 Picker 当前词是多少都不会自动入句。
 3. A 第一次按 A：`alpha` 反显，只表示确认，尚未发送。
 4. A 第二次按 A：A 生成 `req=r1`，发送 `WORD_OFFER{req:r1,text:alpha}`，不带 `pos`，进入 `SENDING / WAIT`。
@@ -282,7 +282,7 @@ NVS magic 为 `WIH4`，保存：
 
 因此，“断线保留 req 重试”仅描述运行中的热插拔；不能写成“断电后续传”。
 
-## 10. 软件测试：46 项
+## 10. 软件测试：49 项
 
 运行：
 
@@ -290,68 +290,71 @@ NVS magic 为 `WIH4`，保存：
 pio test -e native
 ```
 
-native 使用同一套协议、Picker、Sentence 和 WordGame 源码，以固定随机种子、虚拟时间、脚本按键和可控虚拟 UART 测试。套件共 46 项：5 项基础协议/JSON、8 项协议故障、33 项游戏/句子编辑。双板 Web 模拟器另有 14 项 Python 模型与 HTTP 测试，命令见 [模拟器使用说明](simulator.md#8-测试)。
+native 使用同一套协议、Picker、Sentence 和 WordGame 源码，以固定随机种子、虚拟时间、脚本按键和可控虚拟 UART 测试。套件共 49 项：7 项基础协议/JSON/开放加入、8 项协议故障、34 项游戏/句子编辑。双板 Web 模拟器另有 14 项 Python 模型与 HTTP 测试，命令见 [模拟器使用说明](simulator.md#8-测试)。开放握手的字段和冲突闭环另见 [开放加入与冲突恢复](open-join.md)。
 
-### 10.1 基础协议与 JSON（5）
+### 10.1 基础协议、JSON 与开放加入（7）
 
 | # | 测试 | 覆盖点 |
 |---:|---|---|
-| 1 | `test_crc_and_json` | CRC、JSON 重复键/数字/Unicode/控制文本/长度、帧编码 |
+| 1 | `test_crc_and_json` | CRC、JSON 重复键/数字/Unicode/控制文本/长度、v3 帧编码 |
 | 2 | `test_json_depth_roundtrip` | JSON 深度边界和序列化 |
 | 3 | `test_handshake_information_and_disconnect` | 握手、sid/topology、NODE_GET、断线重连 |
 | 4 | `test_foreign_kit_is_rejected` | 不同 kit 拒绝连接 |
-| 5 | `test_recorder_role_mismatch_is_rejected` | recorder/member 角色校验 |
+| 5 | `test_unlisted_modules_join` | 未登记陌生 ID 无需白名单即可加入 |
+| 6 | `test_same_device_restart_keeps_id` | 同设备换 boot 不换号、不触发换号回调 |
+| 7 | `test_id_conflict_reassigns_persists_and_recovers` | 同 ID 不同指纹双方换号、回调保存并重连 |
 
 ### 10.2 协议故障（8）
 
 | # | 测试 | 覆盖点 |
 |---:|---|---|
-| 6 | `test_repeated_hello_and_frame_recovery` | 重复 HELLO、CRC 损坏、LACK 丢失、重复帧 |
-| 7 | `test_failed_send_preserves_next_tx` | 发送失败后序号状态可继续 |
-| 8 | `test_one_way_failure_and_stale_session` | 单向故障、超时、旧 sid 帧拒绝 |
-| 9 | `test_three_node_forward_and_reorder` | 三块短链转发和重排 |
-| 10 | `test_buffered_pong_prevents_timeout_reset` | 延迟 PONG 与链路活动 |
-| 11 | `test_broadcast_shares_seq_across_paths` | 多路径广播去重 |
-| 12 | `test_busy_and_interbyte_timeout` | LBUSY、字节间超时 |
-| 13 | `test_crc_prefix_resync` | CRC 前缀噪声后的重同步 |
+| 8 | `test_repeated_hello_and_frame_recovery` | 重复 HELLO、CRC 损坏、LACK 丢失、重复帧 |
+| 9 | `test_failed_send_preserves_next_tx` | 发送失败后序号状态可继续 |
+| 10 | `test_one_way_failure_and_stale_session` | 单向故障、超时、旧 sid 帧拒绝 |
+| 11 | `test_three_node_forward_and_reorder` | 三块短链转发和重排 |
+| 12 | `test_buffered_pong_prevents_timeout_reset` | 延迟 PONG 与链路活动 |
+| 13 | `test_broadcast_shares_seq_across_paths` | 多路径广播去重 |
+| 14 | `test_busy_and_interbyte_timeout` | LBUSY、字节间超时 |
+| 15 | `test_crc_prefix_resync` | CRC 前缀噪声后的重同步 |
 
-### 10.3 Picker、传输和句子编辑（33）
+### 10.3 Picker、传输和句子编辑（34）
 
 | # | 测试 | 覆盖点 |
 |---:|---|---|
-| 14 | `test_picker_and_buttons` | 无限历史/新词、相邻不重复、刷新 |
-| 15 | `test_left_transfer_and_node_info` | 双确认主动传词、接收方入句、ACCEPT 后随机 |
-| 16 | `test_reverse_transfer_goes_to_right` | 反向无 pos offer 的默认句尾/入边行为 |
-| 17 | `test_lost_accept_is_idempotent` | ACCEPT 丢失不重复插入 |
-| 18 | `test_hotplug_during_transfer` | OFFER 阶段热插拔、同 req 续试 |
-| 19 | `test_reconnect_after_lost_accept` | 入句后断线、重连幂等 |
-| 20 | `test_repeated_full_game_cycles` | 12 轮主动/拉取循环和反复重连 |
-| 21 | `test_cancel_restore_and_no_link` | 无连接提示、取消、刷新、清句 |
-| 22 | `test_three_contributions_and_two_link_guard` | 双邻居守卫、多块来词和离线保句 |
-| 23 | `test_refresh_never_returns_current_word` | 刷新不返回当前词 |
-| 24 | `test_simultaneous_bidirectional_transfer_keeps_sentence` | 双向同时主动传词 |
-| 25 | `test_error_requires_pending_peer` | ERROR 的对端和 pending 匹配 |
-| 26 | `test_cancel_requests_save` | 取消/滚动触发保存 |
-| 27 | `test_reversed_reconnect_keeps_word_position` | 换向重连不移动已收词 |
-| 28 | `test_restored_receipt_blocks_replay_after_clear` | 恢复 receipt、清句后的旧 req 防重放 |
-| 29 | `test_unknown_restored_source_appends_without_overwrite` | 旧来源为空时安全插入而不覆盖 |
-| 30 | `test_positioned_pull_order_and_cursor_from_each_side` | 两侧定位 pull、顺序和 cursor |
-| 31 | `test_sentence_cursor_delete_confirm_cancel_and_clear` | 循环选择、删除确认/取消、清句 |
-| 32 | `test_empty_sentence_can_pull` | 空 Sentence 拉取首词 |
-| 33 | `test_hotplug_preserves_pull_request_without_duplicate` | PULL 热插拔、同 req、无重复 |
-| 34 | `test_positioned_pull_lost_accept_is_idempotent` | 定位 pull 的 ACCEPT 丢失幂等 |
-| 35 | `test_sentence_capacity_and_position_bounds` | 12 词上限、位置边界、满句拒绝 |
-| 36 | `test_restore_sentence_cursor_order_and_replay_tombstone` | WIH4 所需顺序/cursor/sources/receipt 恢复逻辑 |
-| 37 | `test_simultaneous_bidirectional_positioned_pulls` | 双向同时定位 pull |
-| 38 | `test_insert_mode_disconnect_and_cancel_return_to_navigation` | 插入页断线/取消后返回导航，可继续删除 |
-| 39 | `test_remote_candidate_change_requests_display` | 对端换词更新候选并请求重绘 |
-| 40 | `test_incomplete_receipts_are_not_evicted` | 未完成 receipt 不淘汰、DONE 后回收 |
-| 41 | `test_delete_last_word_keeps_empty_sentence_navigation` | 删除最后一词后停留空 Sentence/Navigate，cursor 归零且 A 不误进入其他模式 |
-| 42 | `test_cancelled_offer_does_not_retry` | B 取消 offer 后不再重试，候选词保持不变 |
-| 43 | `test_cancelled_pull_does_not_retry` | B 取消 pull 后回 Navigate、不再重试，对端不建立 offer |
-| 44 | `test_pull_position_is_fixed_when_cursor_moves` | pull 发出后移动 cursor 不改固定 pos，新词仍插到原请求位置 |
-| 45 | `test_delete_confirm_is_stable_when_link_connects` | DeleteConfirm 期间建立连接不改变删除目标或模式 |
-| 46 | `test_second_link_exits_insert_side` | 第二邻居出现时退出 InsertSide，禁止自动选目标或发起 pull |
+| 16 | `test_picker_and_buttons` | 无限历史/新词、相邻不重复、刷新 |
+| 17 | `test_left_transfer_and_node_info` | 双确认主动传词、接收方入句、ACCEPT 后随机 |
+| 18 | `test_reverse_transfer_goes_to_right` | 反向无 pos offer 的默认句尾/入边行为 |
+| 19 | `test_lost_accept_is_idempotent` | ACCEPT 丢失不重复插入 |
+| 20 | `test_hotplug_during_transfer` | OFFER 阶段热插拔、同 req 续试 |
+| 21 | `test_reconnect_after_lost_accept` | 入句后断线、重连幂等 |
+| 22 | `test_repeated_full_game_cycles` | 12 轮主动/拉取循环和反复重连 |
+| 23 | `test_cancel_restore_and_no_link` | 无连接提示、取消、刷新、清句 |
+| 24 | `test_three_contributions_and_two_link_guard` | 双邻居守卫、多块来词和离线保句 |
+| 25 | `test_refresh_never_returns_current_word` | 刷新不返回当前词 |
+| 26 | `test_simultaneous_bidirectional_transfer_keeps_sentence` | 双向同时主动传词 |
+| 27 | `test_error_requires_pending_peer` | ERROR 的对端和 pending 匹配 |
+| 28 | `test_cancel_requests_save` | 取消/滚动触发保存 |
+| 29 | `test_reversed_reconnect_keeps_word_position` | 换向重连不移动已收词 |
+| 30 | `test_restored_receipt_blocks_replay_after_clear` | 恢复 receipt、清句后的旧 req 防重放 |
+| 31 | `test_unknown_restored_source_appends_without_overwrite` | 旧来源为空时安全插入而不覆盖 |
+| 32 | `test_positioned_pull_order_and_cursor_from_each_side` | 两侧定位 pull、顺序和 cursor |
+| 33 | `test_sentence_cursor_delete_confirm_cancel_and_clear` | 循环选择、删除确认/取消、清句 |
+| 34 | `test_empty_sentence_can_pull` | 空 Sentence 拉取首词 |
+| 35 | `test_hotplug_preserves_pull_request_without_duplicate` | PULL 热插拔、同 req、无重复 |
+| 36 | `test_positioned_pull_lost_accept_is_idempotent` | 定位 pull 的 ACCEPT 丢失幂等 |
+| 37 | `test_sentence_capacity_and_position_bounds` | 12 词上限、位置边界、满句拒绝 |
+| 38 | `test_restore_sentence_cursor_order_and_replay_tombstone` | WIH4 所需顺序/cursor/sources/receipt 恢复逻辑 |
+| 39 | `test_simultaneous_bidirectional_positioned_pulls` | 双向同时定位 pull |
+| 40 | `test_insert_mode_disconnect_and_cancel_return_to_navigation` | 插入页断线/取消后返回导航，可继续删除 |
+| 41 | `test_remote_candidate_change_requests_display` | 对端换词更新候选并请求重绘 |
+| 42 | `test_incomplete_receipts_are_not_evicted` | 未完成 receipt 不淘汰、DONE 后回收 |
+| 43 | `test_delete_last_word_keeps_empty_sentence_navigation` | 删除最后一词后停留空 Sentence/Navigate，cursor 归零且 A 不误进入其他模式 |
+| 44 | `test_cancelled_offer_does_not_retry` | B 取消 offer 后不再重试，候选词保持不变 |
+| 45 | `test_cancelled_pull_does_not_retry` | B 取消 pull 后回 Navigate、不再重试，对端不建立 offer |
+| 46 | `test_pull_position_is_fixed_when_cursor_moves` | pull 发出后移动 cursor 不改固定 pos，新词仍插到原请求位置 |
+| 47 | `test_delete_confirm_is_stable_when_link_connects` | DeleteConfirm 期间建立连接不改变删除目标或模式 |
+| 48 | `test_second_link_exits_insert_side` | 第二邻居出现时退出 InsertSide，禁止自动选目标或发起 pull |
+| 49 | `test_offer_and_pull_after_id_conflict_recovery` | ID 冲突恢复后完成主动 OFFER 和定位 PULL |
 
 这些测试不验证字体在实际面板上的效果、电气安全、真实 UART 时序、PSRAM、休眠电流或残影。
 
@@ -359,11 +362,11 @@ native 使用同一套协议、Picker、Sentence 和 WordGame 源码，以固定
 
 本分支已在本机一块 N8R8 上完成有限的启动检查：固件烧录哈希校验通过；启动日志确认 8 MB PSRAM；旧 WIH3 状态成功迁移并恢复 Picker；墨水屏完成全刷和快速局刷；空闲进入休眠前完成 NVS 保存，未再出现重启。首次实板启动曾在 NVS 迁移时因主任务栈上的多个大状态副本触发 `Double exception`，现已将启动与保存缓冲区改为静态存储并复测通过。
 
-以下完整步骤仍**尚待实板执行**，尤其是双板握手、收词后的 Sentence 页面、删除、定位 pull 和故障恢复。本机写入真实节点 ID 后已确认 `configured=1、uart=1、identity=1`；当前 `links=0`，另一块板仍需配置真实 ID，不能记为双板通过。接线、电气风险和 RGB 差异见 `wiring.md`；显示和休眠的完整验收见 `display-design-requirements.md`。
+以下完整步骤仍**尚待实板执行**，尤其是双板握手、收词后的 Sentence 页面、删除、定位 pull 和故障恢复。开放加入后不再要求预写 member ID；两板同步 WLP2 v3 并确认 `configured=1、uart=1、identity=1` 后即可接触握手。若发生 ID 冲突，应看到自动换号和 `saved=1`，不能只凭 `links=0` 判断需要静态配置。接线、电气风险和 RGB 差异见 `wiring.md`；显示和休眠的完整验收见 `display-design-requirements.md`。
 
 ### 11.1 准备和基本交互
 
-1. 为每块板在 `src/config.h` 配置真实 kit、recorder、member ID，确认角色与成员表一致；不要沿用占位 ID 期待通过校验。
+1. 两块板使用相同 `WIH_KIT_ID` 和同一 WLP2 v3 固件提交，不配置 member/recorder 白名单；核对节点 ID、指纹、boot 和可能的冲突换号日志。
 2. 按固定 N8R8 配置执行 `pio run` 和 `pio run -t upload`。串口确认无持续 Busy Timeout，并记录 `psram: found=1` 及 8 MB 容量；若日志不符，先停止功能验收。
 3. 单机检查 Picker：双向旋转、相邻词不重复、A 第一次反显、B 取消、未确认时 B 刷新；确认/取消只刷中央区域。
 4. A-B 直连并完成握手。A 两次按 A 后，确认 A 在 ACCEPT 前不换词，B 收到后进入 Sentence；完成后 A 才随机。B 的 Picker 当前词不得自动插入句子。
@@ -395,9 +398,9 @@ native 使用同一套协议、Picker、Sentence 和 WordGame 源码，以固定
 
 ## 12. 已知限制
 
-- **完整硬件验收未完成**：仅通过第 11 节所述单板启动、Picker 显示和保存检查；Sentence 实板交互、电气和真实 UART 尚未验收。46 项 native 测试和 14 项模拟器测试通过不等于硬件通过。
+- **完整硬件验收未完成**：仅通过第 11 节所述单板启动、Picker 显示和保存检查；Sentence 实板交互、电气和真实 UART 尚未验收。49 项 native 测试和 14 项模拟器测试通过不等于硬件通过。
 - **ASCII 字体**：当前 FreeSans/内置字体路径只保证内置英文词库的 ASCII 字形。协议能接收其他 UTF-8 文本，但非 ASCII 字形和宽度显示未实现。
-- **真实 ID 仍需配置**：`src/config.h` 中的 kit、recorder、member 占位/示例值必须替换成实际套件配置，未知成员和角色不匹配会被拒绝。
+- **开放加入无准入控制**：相同固件和 kit 的陌生模块都能加入；MAC 指纹仅用于冲突检测，不提供密码学认证。冲突换号保存需实板核对 `saved=1` 和重启保持。
 - **CAPTURE/READY 未实现**：记录者冻结保存事务、句子历史 Flash 日志和电脑底座导出不在当前实现内。
 - **pending 与编辑会话不跨断电保证**：见第 9 节；热插拔重试不能解释为断电续传。
 - **取消不是分布式事务**：B 只取消本机 pending，不会删除对端已经接收的词。

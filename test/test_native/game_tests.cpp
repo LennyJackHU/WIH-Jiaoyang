@@ -105,17 +105,11 @@ struct Device {
 };
 
 Identity identity(const char* id, const char* boot) {
-    static const char* members[] = {
-        "0000000000000001", "0000000000000002", "0000000000000003"
-    };
     Identity value = {};
     snprintf(value.id, sizeof(value.id), "%s", id);
     snprintf(value.boot, sizeof(value.boot), "%s", boot);
     snprintf(value.kit, sizeof(value.kit), "%s", "0123456789abcdef0123456789abcdef");
-    snprintf(value.recorder, sizeof(value.recorder), "%s", "0000000000000003");
-    value.role = Role::Word;
-    for (unsigned i = 0; i < 3; ++i) value.members[i] = members[i];
-    value.memberCount = 3;
+    snprintf(value.fingerprint, sizeof(value.fingerprint), "%s", id);
     return value;
 }
 
@@ -425,7 +419,6 @@ void test_three_contributions_and_two_link_guard() {
     uint32_t now = 0;
     beginPair(left, center, now);
     Identity ri = identity("0000000000000003", "00000000000000c1");
-    ri.role = Role::Recorder;
     TEST_ASSERT_TRUE(right.game.begin(ri, now));
     run(left, center, right, now, 1500);
     TEST_ASSERT_TRUE(center.game.remote(Port::Left).orderValid);
@@ -1109,7 +1102,6 @@ void test_second_link_exits_insert_side() {
     uint32_t now = 0;
     beginPair(left, center, now);
     Identity ri = identity("0000000000000003", "00000000000000c1");
-    ri.role = Role::Recorder;
     TEST_ASSERT_TRUE(right.game.begin(ri, now));
     run(left, center, right, now, 1000);
     center.game.restoreSentence(makeSentence({"alpha"}), false);
@@ -1125,6 +1117,39 @@ void test_second_link_exits_insert_side() {
     TEST_ASSERT_FALSE(center.game.pullPending());
     TEST_ASSERT_FALSE(left.game.transferPending());
     TEST_ASSERT_FALSE(right.game.transferPending());
+}
+
+void test_offer_and_pull_after_id_conflict_recovery() {
+    stateA = 0x13572468;
+    stateB = 0x24681357;
+    Device a(randomA);
+    Device b(randomB);
+    connect(a, b);
+    uint32_t now = 0;
+    Identity ai = identity("4000000000000004", "00000000000000a1");
+    Identity bi = identity("4000000000000004", "00000000000000b1");
+    snprintf(bi.fingerprint, sizeof(bi.fingerprint), "%s", "5000000000000005");
+    TEST_ASSERT_TRUE(a.game.begin(ai, now));
+    TEST_ASSERT_TRUE(b.game.begin(bi, now));
+    run(a, b, now, 2000);
+    TEST_ASSERT_TRUE(a.node.link(Port::Right).up());
+    TEST_ASSERT_TRUE(b.node.link(Port::Left).up());
+    TEST_ASSERT_STR_NE(a.node.identity().id, b.node.identity().id);
+
+    a.game.pressConfirm(now);
+    a.game.pressConfirm(now);
+    run(a, b, now, 1600);
+    TEST_ASSERT_EQUAL_UINT8(1, b.game.sentence().count());
+    TEST_ASSERT_EQUAL(WordGame::View::Sentence, b.game.view());
+
+    b.game.pressConfirm(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::InsertSide, b.game.editMode());
+    b.game.pressRefresh(now);
+    b.game.pressConfirm(now);
+    TEST_ASSERT_TRUE(b.game.pullPending());
+    run(a, b, now, 1600);
+    TEST_ASSERT_EQUAL_UINT8(2, b.game.sentence().count());
+    TEST_ASSERT_FALSE(b.game.pullPending());
 }
 
 } // namespace
@@ -1163,4 +1188,5 @@ void runGameTests() {
     RUN_TEST(test_pull_position_is_fixed_when_cursor_moves);
     RUN_TEST(test_delete_confirm_is_stable_when_link_connects);
     RUN_TEST(test_second_link_exits_insert_side);
+    RUN_TEST(test_offer_and_pull_after_id_conflict_recovery);
 }

@@ -28,27 +28,15 @@
 #define PIN_UART_R_TX 15
 #define PIN_UART_R_RX 16
 
-// Replace these provisioning placeholders with the actual kit member IDs.
+// Shared application identifier; physical neighbors join without a member list.
 #ifndef WIH_KIT_ID
 #define WIH_KIT_ID "9d31f2a84c07e6b15a890d42c3f671e0"
-#endif
-#ifndef WIH_RECORDER_ID
-#define WIH_RECORDER_ID "0000000000000003"
-#endif
-#ifndef WIH_MEMBER_1_ID
-#define WIH_MEMBER_1_ID "0000ac3a2a6b4580"
-#endif
-#ifndef WIH_MEMBER_2_ID
-#define WIH_MEMBER_2_ID "0000683d2a6b4580"
-#endif
-#ifndef WIH_MEMBER_3_ID
-#define WIH_MEMBER_3_ID "0000000000000003"
 #endif
 
 // ---- Behaviour ----
 #define DISPLAY_THROTTLE_MS   50    // extra delay after the BUSY-limited refresh
 #define FULL_REFRESH_EVERY    20    // full refresh after N partial updates
-#define SLEEP_IDLE_MS         5000  // keep partial-refresh state during interaction bursts
+#define DISPLAY_IDLE_MS       5000  // panel hibernate delay; MCU and UART stay awake
 #define BTN_DEBOUNCE_MS       30
 #define HISTORY_LEN           32    // ring size of recent word history
 

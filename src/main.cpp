@@ -11,7 +11,11 @@
 static wlp2::Handler initialHandler;
 static UartBytePort leftUart(Serial1);
 static UartBytePort rightUart(Serial2);
-static wlp2::Node node(&leftUart, &rightUart, initialHandler, esp_random);
+static void nodeIdChanged(const char* id) {
+    bool saved = storageSaveNodeId(id);
+    Serial.printf("wlp2: reassigned id=%s saved=%d\n", id, saved);
+}
+static wlp2::Node node(&leftUart, &rightUart, initialHandler, esp_random, nodeIdChanged);
 static WordGame game(node, esp_random, esp_random);
 static bool protocolReady = false;
 static bool dirty = false;
@@ -296,6 +300,6 @@ void loop() {
     handleButtons(now);
     serviceNvs(now);
 
-    if (now - lastActivityMs >= SLEEP_IDLE_MS) hibernateDisplayWhenIdle();
+    if (now - lastActivityMs >= DISPLAY_IDLE_MS) hibernateDisplayWhenIdle();
     else if (dirty && now - lastDrawMs >= DISPLAY_THROTTLE_MS) draw(true);
 }

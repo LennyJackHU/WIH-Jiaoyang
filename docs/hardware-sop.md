@@ -2,12 +2,11 @@
 
 本流程用于把同一固件安全同步到两台电脑控制的 N8R8，并验证持续监听、即时传词和句子互动。任何一步失败都先记录原始日志，不把 native 或 Web 模拟结果当作实板通过。
 
-## 1. 固定硬件与身份
+## 1. 固定硬件与开放身份
 
 - 两块板均为 ESP32-S3-DevKitC-1 N8R8，只使用 `esp32-s3-devkitc-1-n8r8` 固件环境。
-- 第一板节点 ID：`0000ac3a2a6b4580`，对应 `WIH_MEMBER_1_ID`。
-- 第二板节点 ID：`0000683d2a6b4580`，对应 `WIH_MEMBER_2_ID`。
-- 两板的 `WIH_KIT_ID`、`WIH_RECORDER_ID` 和完整 member 表必须一致。启动时双方都应出现 `configured=1 uart=1 identity=1` 和 `psram: found=1`。
+- 不再配置 `WIH_MEMBER_x_ID` 或 recorder 白名单；节点 ID 首次由 MAC 派生，陌生模块使用相同 `WIH_KIT_ID` 即可开放加入。
+- 同设备重启不换号；同 ID 不同指纹时双方随机换号并保存到 NVS。启动时双方都应出现 `configured=1 uart=1 identity=1` 和 `psram: found=1`，换号时应出现 `reassigned ... saved=1`。详见 `docs/open-join.md`。
 
 ## 2. 持续监听要求
 
@@ -30,7 +29,7 @@ Pogo 连接、有效来词和本地输入应立即处理；显示恢复时重新
 ## 4. 修改、测试与发布顺序
 
 1. 修改代码及对应文档，运行 `git diff --check`。
-2. 运行 46 项 native 测试：`pio test -e native`。
+2. 运行 49 项 native 测试：`pio test -e native`。
 3. 运行 14 项 Web 测试：`python3 -m unittest simulator.test_simulator -v`。
 4. 构建 N8R8 固件并烧录本机；PlatformIO 卡在包管理时按 `AGENTS.md` 的已验证本机 SCons 方法处理。
 5. 本机串口验收通过后再提交、推送并创建 PR，不推送未实板验证的休眠或通信改动。

@@ -10,20 +10,19 @@ static const uint32_t LINK_TIMEOUT_MS = 3000;
 static const uint32_t ACK_TIMEOUT_MS = 500;
 static const uint32_t BYTE_TIMEOUT_MS = 500;
 
+static const uint32_t PROTOCOL_VERSION = 3;
+
 using RandomFn = uint32_t (*)();
+using IdChangedFn = void (*)(const char* id);
 
 enum class Port : uint8_t { Left = 0, Right = 1, Any = 2 };
 enum class LinkState : uint8_t { Down, Probing, Up };
-enum class Role : uint8_t { Word, Recorder };
 
 struct Identity {
     char id[17];
     char boot[17];
     char kit[33];
-    char recorder[17];
-    Role role;
-    const char* members[3];
-    uint8_t memberCount;
+    char fingerprint[17];
 };
 
 struct LinkInfo {
@@ -62,7 +61,8 @@ public:
 
 class Node {
 public:
-    Node(BytePort* left, BytePort* right, Handler& handler, RandomFn random);
+    Node(BytePort* left, BytePort* right, Handler& handler, RandomFn random,
+         IdChangedFn idChanged = nullptr);
 
     bool begin(const Identity& identity, uint32_t now);
     void tick(uint32_t now);
@@ -84,9 +84,8 @@ private:
         char boot[17];
         char nonce[17];
         char kit[33];
-        char recorder[17];
+        char fingerprint[17];
         Port port;
-        Role role;
     };
 
     struct PendingFrame {
@@ -145,11 +144,10 @@ private:
 
     static int index(Port port);
     static Port opposite(Port port);
-    static bool parseRole(const char* text, Role& role);
-    static const char* roleName(Role role);
     static const char* portName(Port port);
 
     void randomHex(char* out, size_t digits);
+    void reassignId(uint32_t now);
     bool identityAllowed(const Hello& hello, Port localPort) const;
     bool parseHello(const JsonReader& json, Hello& hello, char* echo, size_t echoCap) const;
     void makeSid(PortState& port);
@@ -176,8 +174,8 @@ private:
     BytePort* ports_[2];
     Handler* handler_;
     RandomFn random_;
+    IdChangedFn idChanged_;
     Identity identity_ = {};
-    char members_[3][17] = {};
     bool configured_ = false;
     uint32_t topoRev_ = 0;
     uint32_t nextSeq_ = 1;

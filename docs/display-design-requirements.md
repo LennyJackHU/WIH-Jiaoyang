@@ -198,8 +198,8 @@
 
 ### 7.5 通信、传词与句子
 
-16. 先运行 `pio test -e native`；当前 **46 项**测试必须通过，再进行实板测试。native 结果只证明软件逻辑，不证明电气或真实时序。
-17. 两块同时及交错开机均应握手；核对相反端口、相同 sid、NODE_INFO 词语和 topo_rev。另一 kit、未知成员和第四块不得加入。
+16. 先运行 `pio test -e native`；当前 **49 项**测试必须通过，再进行实板测试。native 结果只证明软件逻辑，不证明电气或真实时序。
+17. 两块陌生模块同时及交错开机均应在相同 kit 下开放握手；核对相反端口、相同 sid、设备指纹、NODE_INFO 词语和 topo_rev。另一 kit 不得加入，同 ID 不同指纹应自动换号并重连。
 18. 双向执行主动 offer：接收方进入 Sentence，本机 Picker 候选不自动入句，发送方收 ACCEPT 后才重随机。无 `pos` 新请求按接收入边到句首/句尾。
 19. 无连接时验证循环 cursor、删除二次确认和 B 取消；删到空句仍留 Sentence，Navigate 的 B 清句回 Picker。
 20. 在唯一有效邻居下验证 InsertSide 的 remote candidate、L BEFORE/R AFTER 和空句首词拉取；同一物理接线下定位只由 cursor/`pos` 决定。
@@ -212,7 +212,7 @@
 ## 8. 当前实现状态与未闭环事项
 
 - 已实现：原有显示/选词/恢复，以及 WLP2 握手、心跳、CRC、可靠帧、短链转发、NODE_INFO、主动 offer、12 词有序 Sentence、Navigate/DeleteConfirm/InsertSide、定位 pull、幂等重试和热插拔恢复。
-- 已验证：`pio test -e native` 的 **46 项软件测试全部通过**；清理构建目录后 `pio run` 的 N8R8 目标固件构建通过。
+- 已验证：`pio test -e native` 的 **49 项软件测试全部通过**；清理构建目录后 `pio run` 的 N8R8 目标固件构建通过。
 - 构建兼容性：Arduino 框架定义了 `word` 宏，句子读取接口使用 `Sentence::text()`，避免主机测试与固件预处理结果不一致。
 - **未验证：上述第 7 节实体屏幕、电气、真实 UART 时序、休眠电流和残影测试。** 文档中的耗时不能直接当作实测结果。
 - 未实现：记录者 CAPTURE/READY 冻结保存事务、句子历史 Flash 日志、电脑底座导出、长期存放自动刷白、每 24 小时定时刷新、编码器 SW 功能。

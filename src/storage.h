@@ -23,3 +23,5 @@ struct PersistState {
 // NVS (flash) persistence - survives power cycles.
 bool storageLoadNvs(PersistState& out);
 bool storageSaveNvs(const PersistState& state);
+bool storageLoadNodeId(char* out, size_t capacity);
+bool storageSaveNodeId(const char* id);

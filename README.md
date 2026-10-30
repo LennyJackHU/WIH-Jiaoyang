@@ -14,7 +14,7 @@ pio run
 pio run -t upload
 ```
 
-`pio upload` 同样使用默认环境。上述默认构建/烧录命令只针对 N8R8，不生成其他 Flash/PSRAM 版本；`native` 仅用于测试。词库更新运行 `python3 tools/build_words.py`。烧录前必须在 `src/config.h` 配置实际 kit、recorder 和 member ID；占位或未知 ID 不会通过成员校验。
+`pio upload` 同样使用默认环境。上述默认构建/烧录命令只针对 N8R8，不生成其他 Flash/PSRAM 版本；`native` 仅用于测试。词库更新运行 `python3 tools/build_words.py`。节点不再需要预注册 member ID；相同 `WIH_KIT_ID` 的物理邻居开放加入，ID 冲突时自动换号并保存到 NVS，详见 [开放加入与冲突恢复](docs/open-join.md)。
 
 ## 当前交互
 
@@ -41,8 +41,8 @@ python3 simulator/server.py
 ## 显示、通信与保存
 
 - **显示与持续监听**：三行选词页和 200×200 句子页；句子按顺序换行，cursor 词反显，长词缩略。无操作约 5 秒后只让墨水屏 hibernate，MCU 不进入深睡，UART、握手、`game.tick()` 和重试始终运行；连接、来词或本地输入会立即重新初始化并全刷显示，无需 A 唤醒。
-- **通信**：WLP2 双 UART 握手、身份/套件校验、sid 心跳、CRC32、LACK/LBUSY、重传去重、NODE_INFO 邻接核对和最多三块短链转发。词传输要求直接邻居。
-- **持久化**：WIH4 保存 Picker、句子顺序、cursor、来源和 receipts，并迁移 NVS WIH1/WIH2/WIH3。编辑模式与 offer/pull pending **不保证跨断电恢复**；断线重试不等于断电续传。
+- **通信**：WLP2 v3 双 UART 开放握手、kit 校验、MAC 设备指纹、ID 冲突自动换号、sid 心跳、CRC32、LACK/LBUSY、重传去重、NODE_INFO 邻接核对和最多三块短链转发。词传输要求直接邻居，不需要 member 白名单。
+- **持久化**：WIH4 保存 Picker、句子顺序、cursor、来源和 receipts，并迁移 NVS WIH1/WIH2/WIH3；`wih/node_id` 保存冲突后分配的新节点 ID。编辑模式与 offer/pull pending **不保证跨断电恢复**；断线重试不等于断电续传。
 
 ## 测试与验收
 
@@ -51,13 +51,15 @@ pio test -e native
 python3 -m unittest simulator.test_simulator -v
 ```
 
-当前共 **46 项 native 测试**和 **14 项模拟器测试**。native 覆盖 JSON/WLP2、故障注入、双机/三块、主动 offer、定位 pull、删除/cursor、容量、持久化恢复、幂等和热插拔；模拟器测试覆盖确定性模型与 HTTP API。测试或目标编译通过都不代表实板已验证。
+当前共 **49 项 native 测试**和 **14 项模拟器测试**。native 覆盖 JSON/WLP2、开放加入、同设备重启、ID 冲突恢复、故障注入、双机/三块、主动 offer、定位 pull、删除/cursor、容量、持久化恢复、幂等和热插拔；模拟器测试覆盖确定性模型与 HTTP API。测试或目标编译通过都不代表实板已验证。
 
 ## 文档与边界
 
+- [开放加入与节点 ID 冲突恢复](docs/open-join.md)
 - [句子编辑器详细说明与手动验收](docs/sentence-editor.md)
 - [双板 Web 模拟器使用说明](docs/simulator.md)
 - [显示设计需求与验收规范](docs/display-design-requirements.md)
 - [接线、电气风险与按钮极性](docs/wiring.md)
+- [双板同步与 Pogo 验收 SOP](docs/hardware-sop.md)
 
-当前字体只保证 ASCII 显示；真实 ID 仍需配置；CAPTURE/READY 记录者冻结保存事务、句子历史 Flash 日志和电脑底座导出尚未实现。实体屏幕、真实 UART、电气安全热插拔、休眠电流和残影仍须按文档手动验收。
+当前字体只保证 ASCII 显示；开放加入不提供密码学认证；CAPTURE/READY 记录者冻结保存事务、句子历史 Flash 日志和电脑底座导出尚未实现。实体屏幕、真实 UART、电气安全热插拔、休眠电流和残影仍须按文档手动验收。
