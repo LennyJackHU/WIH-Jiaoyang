@@ -4,6 +4,10 @@
 #include <Fonts/FreeSans12pt7b.h>
 #include <Fonts/FreeSansBold12pt7b.h>
 #include <Fonts/FreeSansBold18pt7b.h>
+#include <Fonts/FreeSerif12pt7b.h>
+#include <Fonts/FreeSerif18pt7b.h>
+#include <Fonts/FreeSerifItalic12pt7b.h>
+#include <Fonts/FreeSerifItalic18pt7b.h>
 #include "wlp2_json.h"
 
 GxEPD2_BW<GxEPD2_154_D67, GxEPD2_154_D67::HEIGHT> epd(
@@ -13,11 +17,10 @@ static bool spiBegun = false;
 
 static const int16_t SCREEN_W = 200;
 static const int16_t SCREEN_H = 200;
-static const int16_t BAND_Y = 69;
-static const int16_t BAND_H = 62;
-static const int16_t CENTER_MAX_W = SCREEN_W - 52;
-static const int16_t SENTENCE_X = 10;
-static const int16_t SENTENCE_W = 180;
+static const int16_t PAPER_X = 24;
+static const int16_t PAPER_Y = 74;
+static const int16_t PAPER_W = 152;
+static const int16_t PAPER_H = 62;
 
 void displayInit() {
     if (!spiBegun) {
@@ -30,16 +33,21 @@ void displayInit() {
     epd.setTextSize(1);
 }
 
-static uint16_t textWidth(const GFXfont* font, const char* word) {
+static uint16_t textWidth(const GFXfont* font, const char* text) {
+    if (!text || !text[0]) return 0;
     epd.setFont(font);
-    int16_t tbx, tby;
-    uint16_t tbw, tbh;
-    epd.getTextBounds(word, 0, 0, &tbx, &tby, &tbw, &tbh);
-    return tbw;
+    int16_t x, y;
+    uint16_t w, h;
+    epd.getTextBounds(text, 0, 0, &x, &y, &w, &h);
+    return w;
 }
 
 static void fitText(const GFXfont* font, const char* text, int16_t maxWidth,
                     char* out, size_t capacity) {
+    if (!text) {
+        out[0] = '\0';
+        return;
+    }
     snprintf(out, capacity, "%s", text);
     if (textWidth(font, out) <= maxWidth) return;
     size_t len = strlen(out);
@@ -57,187 +65,159 @@ static void fitText(const GFXfont* font, const char* text, int16_t maxWidth,
     snprintf(out, capacity, ".");
 }
 
-static void drawCentered(const char* word, const GFXfont* font,
-                         int16_t yTop, int16_t yBottom, uint16_t color) {
-    if (!word || !word[0]) return;
+static void drawCenteredIn(const char* value, const GFXfont* font,
+                           int16_t x, int16_t y, int16_t w, int16_t h,
+                           uint16_t color) {
+    if (!value || !value[0]) return;
     char fitted[wlp2::TEXT_MAX + 4];
-    fitText(font, word, CENTER_MAX_W, fitted, sizeof(fitted));
+    fitText(font, value, w - 8, fitted, sizeof(fitted));
     epd.setFont(font);
-    int16_t tbx, tby;
-    uint16_t tbw, tbh;
-    epd.getTextBounds(fitted, 0, 0, &tbx, &tby, &tbw, &tbh);
-    int16_t x = (SCREEN_W - tbw) / 2 - tbx;
-    int16_t baseline = yTop + (yBottom - yTop) / 2 - tby - (int16_t)tbh / 2;
-    epd.setCursor(x, baseline);
+    int16_t bx, by;
+    uint16_t bw, bh;
+    epd.getTextBounds(fitted, 0, 0, &bx, &by, &bw, &bh);
+    epd.setCursor(x + (w - bw) / 2 - bx, y + (h - bh) / 2 - by);
     epd.setTextColor(color);
     epd.print(fitted);
     epd.setTextColor(GxEPD_BLACK);
 }
 
-static const GFXfont* fitCenterFont(const char* word) {
-    static const GFXfont* const tiers[] = {
-        &FreeSansBold18pt7b, &FreeSansBold12pt7b, &FreeSans12pt7b,
-        &FreeSans9pt7b,
-    };
-    for (const GFXfont* f : tiers) {
-        if (textWidth(f, word) <= CENTER_MAX_W) return f;
+static const GFXfont* wordFont(const char* word, bool large, int16_t maxWidth,
+                               char* fitted, size_t capacity) {
+    if (!word || !word[0]) {
+        fitted[0] = '\0';
+        return &FreeSans9pt7b;
     }
-    return &FreeSans9pt7b;
+    const bool phrase = strchr(word, ' ') != nullptr;
+    const size_t length = strlen(word);
+    const GFXfont* candidates[5];
+    uint8_t count = 0;
+    if (phrase) {
+        candidates[count++] = large ? &FreeSansBold12pt7b : &FreeSans12pt7b;
+        candidates[count++] = &FreeSans9pt7b;
+    } else if (length <= 5) {
+        candidates[count++] = large ? &FreeSansBold18pt7b : &FreeSansBold12pt7b;
+        candidates[count++] = &FreeSans12pt7b;
+        candidates[count++] = &FreeSans9pt7b;
+    } else if (length <= 8) {
+        candidates[count++] = large ? &FreeSerifItalic18pt7b : &FreeSerifItalic12pt7b;
+        candidates[count++] = &FreeSerif12pt7b;
+        candidates[count++] = &FreeSans9pt7b;
+    } else {
+        candidates[count++] = large ? &FreeSerif18pt7b : &FreeSerif12pt7b;
+        candidates[count++] = &FreeSerifItalic12pt7b;
+        candidates[count++] = &FreeSans9pt7b;
+    }
+    candidates[count++] = nullptr;
+    for (uint8_t i = 0; i < count; ++i) {
+        fitText(candidates[i], word, maxWidth, fitted, capacity);
+        if (textWidth(candidates[i], fitted) <= maxWidth && strcmp(fitted, word) == 0) {
+            return candidates[i];
+        }
+    }
+    fitText(nullptr, word, maxWidth, fitted, capacity);
+    return nullptr;
 }
 
-static const GFXfont* fitPreviewFont(const char* word) {
-    if (!word || textWidth(&FreeSans12pt7b, word) <= CENTER_MAX_W) {
-        return &FreeSans12pt7b;
-    }
-    return &FreeSans9pt7b;
-}
-
-static void drawHeader(const char* status, uint8_t participants) {
+static void drawSmallLabel(const char* label, int16_t x, int16_t y,
+                           uint16_t color = GxEPD_BLACK) {
     epd.setFont(nullptr);
     epd.setTextSize(1);
+    epd.setTextColor(color);
+    epd.setCursor(x, y);
+    epd.print(label);
     epd.setTextColor(GxEPD_BLACK);
-    epd.setCursor(6, 5);
-    epd.print(status && status[0] ? status : "SENTENCE");
-    if (participants) {
-        char count[8];
-        snprintf(count, sizeof(count), "%u/3", participants);
-        epd.setCursor(174, 5);
-        epd.print(count);
-    }
+}
+
+static void drawPaper(const char* word, int16_t x, int16_t y, int16_t w, int16_t h,
+                      bool inverted, bool large = false, const char* number = nullptr) {
+    if (inverted) epd.fillRect(x, y, w, h, GxEPD_BLACK);
+    else epd.drawRect(x, y, w, h, GxEPD_BLACK);
+    if (number) drawSmallLabel(number, x - 18, y + 2);
+    char fitted[wlp2::TEXT_MAX + 4];
+    const GFXfont* font = wordFont(word, large, w - 10, fitted, sizeof(fitted));
+    drawCenteredIn(fitted, font, x + 3, y + 2, w - 6, h - 4,
+                   inverted ? GxEPD_WHITE : GxEPD_BLACK);
 }
 
 static void renderWords(const char* prev, const char* cur, const char* next,
                         bool confirmed, bool centerOnly, const char* status) {
     epd.fillScreen(GxEPD_WHITE);
     if (!centerOnly) {
-        if (status && status[0]) drawHeader(status, 0);
-        drawCentered(prev, fitPreviewFont(prev), 15, BAND_Y, GxEPD_BLACK);
-        drawCentered(next, fitPreviewFont(next), BAND_Y + BAND_H, SCREEN_H, GxEPD_BLACK);
+        drawSmallLabel(status && status[0] ? status : "PICK A PIECE", 12, 11);
+        drawSmallLabel("WIH", 171, 11);
+        epd.fillTriangle(15, 43, 10, 50, 20, 50, GxEPD_BLACK);
+        drawPaper(prev, 31, 35, 135, 29, false);
+        epd.fillTriangle(15, 166, 10, 159, 20, 159, GxEPD_BLACK);
+        drawPaper(next, 38, 147, 145, 29, false);
+        drawSmallLabel("TURN TO BROWSE   A:KEEP", 37, 187);
     }
 
-    const GFXfont* centerFont = fitCenterFont(cur);
+    epd.fillRect(PAPER_X - 1, PAPER_Y - 6, 18, 5, GxEPD_BLACK);
+    epd.fillRect(PAPER_X + 67, PAPER_Y - 6, 18, 5, GxEPD_BLACK);
+    drawPaper(cur, PAPER_X, PAPER_Y, PAPER_W, PAPER_H, true, true);
     if (confirmed) {
-        epd.fillRect(0, BAND_Y, SCREEN_W, BAND_H, GxEPD_BLACK);
-        drawCentered(cur, centerFont, BAND_Y, BAND_Y + BAND_H, GxEPD_WHITE);
-    } else {
-        epd.drawRect(4, BAND_Y, SCREEN_W - 8, BAND_H, GxEPD_BLACK);
-        const int16_t cy = BAND_Y + BAND_H / 2;
-        epd.fillTriangle(10, cy - 8, 10, cy + 8, 20, cy, GxEPD_BLACK);
-        epd.fillTriangle(SCREEN_W - 10, cy - 8, SCREEN_W - 10, cy + 8,
-                         SCREEN_W - 20, cy, GxEPD_BLACK);
-        drawCentered(cur, centerFont, BAND_Y, BAND_Y + BAND_H, GxEPD_BLACK);
+        epd.drawRect(PAPER_X + 3, PAPER_Y + 3, PAPER_W - 6, PAPER_H - 6, GxEPD_WHITE);
     }
 }
 
-static void fitWord(const GFXfont* font, const char* word, char* out, size_t capacity) {
-    snprintf(out, capacity, "%s", word);
-    if (textWidth(font, out) <= SENTENCE_W) return;
-    size_t len = strlen(out);
-    while (len > 0) {
-        --len;
-        while (len > 0 && (static_cast<unsigned char>(out[len]) & 0xC0) == 0x80) --len;
-        out[len] = '\0';
-        char candidate[wlp2::TEXT_MAX + 4];
-        snprintf(candidate, sizeof(candidate), "%s...", out);
-        if (textWidth(font, candidate) <= SENTENCE_W) {
-            snprintf(out, capacity, "%s", candidate);
-            return;
-        }
-    }
-    snprintf(out, capacity, ".");
+static void drawSentenceHeader(const char* status, uint8_t participants) {
+    epd.fillRect(0, 0, SCREEN_W, 29, GxEPD_BLACK);
+    drawSmallLabel(status && status[0] ? status : "MY COLLAGE", 10, 18, GxEPD_WHITE);
+    char number[8];
+    snprintf(number, sizeof(number), "%02u", participants);
+    drawSmallLabel(number, 176, 18, GxEPD_WHITE);
 }
 
-static uint8_t flowLines(const GFXfont* font, const char** words, uint8_t count) {
-    uint8_t lines = 1;
-    int16_t x = 0;
-    uint16_t space = textWidth(font, " ");
+static void drawSentenceFooter(const char* line) {
+    epd.drawFastHLine(10, 174, 180, GxEPD_BLACK);
+    int16_t x = (SCREEN_W - textWidth(nullptr, line)) / 2;
+    drawSmallLabel(line, x, 188);
+}
+
+static void drawSentenceCollage(const char** words, uint8_t ownIndex, uint8_t count) {
+    static const int16_t layout1[][4] = {
+        {30, 62, 140, 62},
+    };
+    static const int16_t layout2[][4] = {
+        {18, 46, 119, 44}, {62, 112, 126, 46},
+    };
+    static const int16_t layout3[][4] = {
+        {29, 38, 112, 34}, {48, 82, 121, 42}, {27, 134, 163, 34},
+    };
+    const int16_t (*layout)[4] = count == 1 ? layout1 : (count == 2 ? layout2 : layout3);
     for (uint8_t i = 0; i < count; ++i) {
-        char fitted[wlp2::TEXT_MAX + 4];
-        fitWord(font, words[i], fitted, sizeof(fitted));
-        uint16_t width = textWidth(font, fitted);
-        if (x > 0 && x + space + width > SENTENCE_W) {
-            ++lines;
-            x = 0;
-        }
-        if (x > 0) x += space;
-        x += width;
+        char number[4];
+        snprintf(number, sizeof(number), "%02u", i + 1);
+        drawPaper(words[i], layout[i][0], layout[i][1], layout[i][2], layout[i][3],
+                  i == ownIndex, count <= 2, number);
     }
-    return lines;
 }
 
 static void renderSentence(const char* left, const char* own, const char* right,
                            const char* status, uint8_t participants) {
     epd.fillScreen(GxEPD_WHITE);
-    drawHeader(status, participants);
-    epd.drawRect(4, 28, 192, 136, GxEPD_BLACK);
-    const char* words[3];
-    bool local[3];
-    uint8_t count = 0;
-    if (left && left[0]) {
-        words[count] = left;
-        local[count++] = false;
-    }
-    words[count] = own;
-    local[count++] = true;
-    if (right && right[0]) {
-        words[count] = right;
-        local[count++] = false;
-    }
+    drawSentenceHeader(status, participants);
 
-    const GFXfont* font = &FreeSans12pt7b;
-    int16_t lineHeight = 29;
-    uint8_t lines = flowLines(font, words, count);
-    bool fits = true;
-    for (uint8_t i = 0; i < count; ++i) {
-        if (textWidth(font, words[i]) > SENTENCE_W) fits = false;
+    const char* words[3];
+    uint8_t ownIndex = 0;
+    uint8_t count = 0;
+    if (left && left[0]) words[count++] = left;
+    ownIndex = count;
+    if (own && own[0]) words[count++] = own;
+    if (right && right[0]) words[count++] = right;
+
+    if (count == 0) {
+        drawCenteredIn("Empty collage", &FreeSerif18pt7b, 15, 62, 170, 70, GxEPD_BLACK);
+    } else {
+        drawSentenceCollage(words, ownIndex, count);
     }
-    if (!fits || lines > 4) {
-        font = &FreeSans9pt7b;
-        lineHeight = 23;
-        lines = flowLines(font, words, count);
-    }
-    if (lines > 5) {
-        font = nullptr;
-        lineHeight = 15;
-        lines = flowLines(font, words, count);
-    }
-    int16_t y = 30 + (132 - lines * lineHeight) / 2;
-    int16_t x = 0;
-    uint16_t space = textWidth(font, " ");
-    epd.setFont(font);
-    for (uint8_t i = 0; i < count; ++i) {
-        char fitted[wlp2::TEXT_MAX + 4];
-        fitWord(font, words[i], fitted, sizeof(fitted));
-        int16_t tbx, tby;
-        uint16_t width, height;
-        epd.getTextBounds(fitted, 0, 0, &tbx, &tby, &width, &height);
-        if (x > 0 && x + space + width > SENTENCE_W) {
-            x = 0;
-            y += lineHeight;
-        }
-        if (x > 0) x += space;
-        int16_t baseline = y + (lineHeight - height) / 2 - tby;
-        if (local[i]) {
-            epd.fillRect(SENTENCE_X + x - 3, baseline + tby - 3,
-                         width + 6, height + 6, GxEPD_BLACK);
-        }
-        epd.setCursor(SENTENCE_X + x - tbx, baseline);
-        epd.setTextColor(local[i] ? GxEPD_WHITE : GxEPD_BLACK);
-        epd.print(fitted);
-        epd.setTextColor(GxEPD_BLACK);
-        x += width;
-    }
-    epd.setFont(nullptr);
-    epd.setCursor(45, 178);
-    epd.print("A:SELECT  B:CLEAR");
-    epd.fillTriangle(8, 183, 8, 191, 16, 187, GxEPD_BLACK);
-    epd.fillTriangle(192, 183, 192, 191, 184, 187, GxEPD_BLACK);
+    drawSentenceFooter("A:SELECT  B:CLEAR");
 }
 
 void displayDrawWords(const char* prev, const char* cur, const char* next,
                       bool confirmed, bool partial, DisplayArea area, const char* status) {
     bool centerOnly = partial && area == DisplayArea::Center;
-    if (centerOnly) epd.setPartialWindow(0, BAND_Y, SCREEN_W, BAND_H);
+    if (centerOnly) epd.setPartialWindow(0, PAPER_Y - 7, SCREEN_W, PAPER_H + 7);
     else if (partial) epd.setPartialWindow(0, 0, SCREEN_W, SCREEN_H);
     else epd.setFullWindow();
     epd.firstPage();
