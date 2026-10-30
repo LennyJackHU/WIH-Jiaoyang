@@ -71,3 +71,4 @@ command -v pio
 - 屏幕已休眠且 `dirty=false` 时直接返回，避免反复 `saveAll()` 写 NVS。连接、来词和本地输入要刷新空闲计时；下一次重绘先全刷，传输不等待屏幕恢复。
 - 修改→49 项 native+14 项 Web 测试→N8R8 构建→实板超过 5 秒持续监听验证→提交→推送→PR→另一块板同步提交并烧录→Pogo 验收，完整步骤见 `docs/hardware-sop.md`。
 - 不再配置 member/recorder 白名单。相同 `WIH_KIT_ID` 的陌生模块开放加入；HELLO v3 携带 MAC 指纹，冲突双方随机换号并通过 NVS `wih/node_id` 持久化，详见 `docs/open-join.md`。
+- 排查 `configured/identity/links/uartErr/reassigned`、版本、接线和面板休眠时，按 `docs/troubleshooting.md` 的顺序收集双方日志，不要凭单一 `links=0` 或非零历史错误计数猜测原因。

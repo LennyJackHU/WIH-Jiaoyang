@@ -61,5 +61,6 @@ python3 -m unittest simulator.test_simulator -v
 - [显示设计需求与验收规范](docs/display-design-requirements.md)
 - [接线、电气风险与按钮极性](docs/wiring.md)
 - [双板同步与 Pogo 验收 SOP](docs/hardware-sop.md)
+- [通信、休眠与双板排查手册](docs/troubleshooting.md)
 
-当前字体只保证 ASCII 显示；开放加入不提供密码学认证；CAPTURE/READY 记录者冻结保存事务、句子历史 Flash 日志和电脑底座导出尚未实现。实体屏幕、真实 UART、电气安全热插拔、休眠电流和残影仍须按文档手动验收。
+当前字体只保证 ASCII 显示；开放加入不提供密码学认证；CAPTURE/READY 记录者冻结保存事务、句子历史 Flash 日志和电脑底座导出尚未实现。实体屏幕、真实 UART、电气安全热插拔、持续监听功耗和残影仍须按文档手动验收。
