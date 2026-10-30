@@ -88,7 +88,7 @@ static const GFXfont* wordFont(const char* word, bool large, int16_t maxWidth,
         return &FreeSans9pt7b;
     }
     const bool phrase = strchr(word, ' ') != nullptr;
-    const size_t length = word ? strlen(word) : 0;
+    const size_t length = strlen(word);
     const GFXfont* candidates[5];
     uint8_t count = 0;
     if (phrase) {
@@ -118,7 +118,8 @@ static const GFXfont* wordFont(const char* word, bool large, int16_t maxWidth,
     return nullptr;
 }
 
-static void drawSmallLabel(const char* label, int16_t x, int16_t y, uint16_t color = GxEPD_BLACK) {
+static void drawSmallLabel(const char* label, int16_t x, int16_t y,
+                           uint16_t color = GxEPD_BLACK) {
     epd.setFont(nullptr);
     epd.setTextSize(1);
     epd.setTextColor(color);
@@ -154,14 +155,16 @@ static void renderWords(const char* prev, const char* cur, const char* next,
     epd.fillRect(PAPER_X - 1, PAPER_Y - 6, 18, 5, GxEPD_BLACK);
     epd.fillRect(PAPER_X + 67, PAPER_Y - 6, 18, 5, GxEPD_BLACK);
     drawPaper(cur, PAPER_X, PAPER_Y, PAPER_W, PAPER_H, true, true);
-    if (confirmed) epd.drawRect(PAPER_X + 3, PAPER_Y + 3, PAPER_W - 6, PAPER_H - 6, GxEPD_WHITE);
+    if (confirmed) {
+        epd.drawRect(PAPER_X + 3, PAPER_Y + 3, PAPER_W - 6, PAPER_H - 6, GxEPD_WHITE);
+    }
 }
 
-static void drawSentenceHeader(const char* status, uint8_t count) {
+static void drawSentenceHeader(const char* status, uint8_t participants) {
     epd.fillRect(0, 0, SCREEN_W, 29, GxEPD_BLACK);
     drawSmallLabel(status && status[0] ? status : "MY COLLAGE", 10, 18, GxEPD_WHITE);
     char number[8];
-    snprintf(number, sizeof(number), "%02u", count);
+    snprintf(number, sizeof(number), "%02u", participants);
     drawSmallLabel(number, 176, 18, GxEPD_WHITE);
 }
 
@@ -171,7 +174,7 @@ static void drawSentenceFooter(const char* line) {
     drawSmallLabel(line, x, 188);
 }
 
-static void drawLargeCollage(const Sentence& sentence, uint8_t cursor, uint8_t count) {
+static void drawSentenceCollage(const char** words, uint8_t ownIndex, uint8_t count) {
     static const int16_t layout1[][4] = {
         {30, 62, 140, 62},
     };
@@ -185,68 +188,30 @@ static void drawLargeCollage(const Sentence& sentence, uint8_t cursor, uint8_t c
     for (uint8_t i = 0; i < count; ++i) {
         char number[4];
         snprintf(number, sizeof(number), "%02u", i + 1);
-        drawPaper(sentence.text(i), layout[i][0], layout[i][1], layout[i][2], layout[i][3],
-                  i == cursor, count <= 2, number);
+        drawPaper(words[i], layout[i][0], layout[i][1], layout[i][2], layout[i][3],
+                  i == ownIndex, count <= 2, number);
     }
 }
 
-static void drawGridCollage(const Sentence& sentence, uint8_t cursor, uint8_t count) {
-    const uint8_t rows = (count + 1) / 2;
-    const int16_t top = 36;
-    const int16_t available = 132;
-    const int16_t rowStep = available / rows;
-    const int16_t h = rowStep - 4;
-    for (uint8_t i = 0; i < count; ++i) {
-        const uint8_t row = i / 2;
-        const uint8_t col = i % 2;
-        const int16_t x = col == 0 ? 10 + (row % 2) * 4 : 103 - (row % 2) * 4;
-        const int16_t y = top + row * rowStep;
-        drawPaper(sentence.text(i), x, y, 87, h, i == cursor);
-    }
-}
-
-static void drawInsertOption(const char* label, bool selected, int16_t x) {
-    const int16_t y = 116;
-    const int16_t w = 86;
-    const int16_t h = 34;
-    if (selected) epd.fillRect(x, y, w, h, GxEPD_BLACK);
-    else epd.drawRect(x, y, w, h, GxEPD_BLACK);
-    drawCenteredIn(label, &FreeSans9pt7b, x, y, w, h,
-                   selected ? GxEPD_WHITE : GxEPD_BLACK);
-}
-
-static void drawInsertSide(const char* candidate, bool insertAfter) {
-    drawSmallLabel("REMOTE PIECE", 12, 43);
-    drawPaper(candidate, 20, 52, 160, 46, false, false);
-    drawInsertOption("L:BEFORE", !insertAfter, 10);
-    drawInsertOption("R:AFTER", insertAfter, 104);
-}
-
-static void renderSentence(const Sentence& sentence, uint8_t cursor, SentenceEdit edit,
-                           bool insertAfter, const char* candidate, const char* status) {
+static void renderSentence(const char* left, const char* own, const char* right,
+                           const char* status, uint8_t participants) {
     epd.fillScreen(GxEPD_WHITE);
-    const uint8_t count = sentence.count() > 12 ? 12 : sentence.count();
-    drawSentenceHeader(status, count);
+    drawSentenceHeader(status, participants);
 
-    if (edit == SentenceEdit::InsertSide) {
-        drawInsertSide(candidate, insertAfter);
-        drawSentenceFooter("A:INSERT  B:L/R");
-        return;
-    }
+    const char* words[3];
+    uint8_t ownIndex = 0;
+    uint8_t count = 0;
+    if (left && left[0]) words[count++] = left;
+    ownIndex = count;
+    if (own && own[0]) words[count++] = own;
+    if (right && right[0]) words[count++] = right;
 
-    if (sentence.empty()) {
+    if (count == 0) {
         drawCenteredIn("Empty collage", &FreeSerif18pt7b, 15, 62, 170, 70, GxEPD_BLACK);
-    } else if (count <= 3) {
-        drawLargeCollage(sentence, cursor, count);
     } else {
-        drawGridCollage(sentence, cursor, count);
+        drawSentenceCollage(words, ownIndex, count);
     }
-
-    if (edit == SentenceEdit::DeleteConfirm) {
-        drawSentenceFooter("DELETE?  A:YES  B:NO");
-    } else {
-        drawSentenceFooter("A:EDIT/PULL  B:CLEAR");
-    }
+    drawSentenceFooter("A:SELECT  B:CLEAR");
 }
 
 void displayDrawWords(const char* prev, const char* cur, const char* next,
@@ -261,14 +226,13 @@ void displayDrawWords(const char* prev, const char* cur, const char* next,
     } while (epd.nextPage());
 }
 
-void displayDrawSentence(const Sentence& sentence, uint8_t cursor, SentenceEdit edit,
-                         bool insertAfter, const char* candidate, const char* status,
-                         bool partial) {
+void displayDrawSentence(const char* left, const char* own, const char* right,
+                         const char* status, uint8_t participants, bool partial) {
     if (partial) epd.setPartialWindow(0, 0, SCREEN_W, SCREEN_H);
     else epd.setFullWindow();
     epd.firstPage();
     do {
-        renderSentence(sentence, cursor, edit, insertAfter, candidate, status);
+        renderSentence(left, own, right, status, participants);
     } while (epd.nextPage());
 }
 
