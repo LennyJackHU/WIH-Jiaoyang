@@ -14,7 +14,7 @@ pio run
 pio run -t upload
 ```
 
-`pio upload` 同样使用默认环境。词库更新运行 `python3 tools/build_words.py`。烧录前必须在 `src/config.h` 配置实际 kit、recorder 和 member ID；占位或未知 ID 不会通过成员校验。
+`pio upload` 同样使用默认环境。上述默认构建/烧录命令只针对 N8R8，不生成其他 Flash/PSRAM 版本；`native` 仅用于测试。词库更新运行 `python3 tools/build_words.py`。烧录前必须在 `src/config.h` 配置实际 kit、recorder 和 member ID；占位或未知 ID 不会通过成员校验。
 
 ## 当前交互
 
@@ -26,6 +26,18 @@ pio run -t upload
 
 完整的模式切换、双机例子、按键上下文、屏幕布局、协议时序、热插拔和验收步骤见 **[docs/sentence-editor.md](docs/sentence-editor.md)**。
 
+## Web 双板模拟器
+
+仅用 Python 3 标准库即可启动，无需安装前端依赖：
+
+```sh
+python3 simulator/server.py
+```
+
+浏览器打开 `http://127.0.0.1:8000/`；可用 `--port` 换端口。页面支持设置 A/B 候选词、连接/断开 A.R↔B.L、编码器与 A/B 按钮、逐步推进 offer/pull、删除、清句、pending 和日志。完整操作与 API 见 **[docs/simulator.md](docs/simulator.md)**。
+
+模拟器是确定性交互模型，不执行真实 WLP2 帧，也不验证固件或真实 UART。它允许中文 UTF-8 输入，但真实固件仍只有 ASCII 显示保证。
+
 ## 显示、通信与保存
 
 - **显示**：三行选词页和 200×200 句子页；句子按顺序换行，cursor 词反显，长词缩略。单机无操作约 5 秒深睡；联机或等待传词时只休眠屏幕并维持 UART。
@@ -36,13 +48,15 @@ pio run -t upload
 
 ```sh
 pio test -e native
+python3 -m unittest simulator.test_simulator -v
 ```
 
-当前共 **40 项 native 测试**，覆盖 JSON/WLP2、故障注入、双机/三块、主动 offer、定位 pull、删除/cursor、容量、持久化恢复、幂等和热插拔。native 通过及目标编译通过都不代表实板已验证。
+当前共 **46 项 native 测试**和 **14 项模拟器测试**。native 覆盖 JSON/WLP2、故障注入、双机/三块、主动 offer、定位 pull、删除/cursor、容量、持久化恢复、幂等和热插拔；模拟器测试覆盖确定性模型与 HTTP API。测试或目标编译通过都不代表实板已验证。
 
 ## 文档与边界
 
 - [句子编辑器详细说明与手动验收](docs/sentence-editor.md)
+- [双板 Web 模拟器使用说明](docs/simulator.md)
 - [显示设计需求与验收规范](docs/display-design-requirements.md)
 - [接线、电气风险与按钮极性](docs/wiring.md)
 

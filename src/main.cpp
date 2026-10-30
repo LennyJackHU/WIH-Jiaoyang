@@ -185,7 +185,8 @@ static void draw(bool partial) {
 }
 
 static bool saveAll() {
-    PersistState s = {};
+    static PersistState s;
+    memset(&s, 0, sizeof(s));
     fillState(s);
     rtcStateSave(s);
     bool ok = storageSaveNvs(s);
@@ -282,7 +283,7 @@ void setup() {
 #else
     Serial.println("psram: disabled");
 #endif
-    PersistState s;
+    static PersistState s;
     ignoreButtonsUntilRelease = wokeFromSleep;
 #if FRESH_RANDOM_ON_BOOT
     Serial.println("fresh start (test mode)");

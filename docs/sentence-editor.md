@@ -1,6 +1,8 @@
 # WIH 句子编辑器：交互、协议与验收
 
-本文描述当前 `esp32-s3-devkitc-1-n8r8` 固件的 Picker、Sentence 和词传输行为。实现依据是 `src/word_game.cpp`、`src/sentence.cpp`、`src/display.cpp`、`src/storage.cpp` 及 native 测试。这里的“已支持”指软件实现；**没有实板验证记录，不能把本文当作硬件验收结果**。
+本文描述当前 `esp32-s3-devkitc-1-n8r8` 固件的 Picker、Sentence 和词传输行为。实现依据是 `src/word_game.cpp`、`src/sentence.cpp`、`src/display.cpp`、`src/storage.cpp` 及 native 测试。这里的“已支持”指软件实现；实板仅完成第 11 节记录的单板启动/显示/保存检查，**不能把本文当作完整双板硬件验收结果**。
+
+可在电脑上按阶段操作同一交互模型，见 [双板 Web 模拟器使用说明](simulator.md)。模拟器不执行真实 WLP2 帧，也不验证真实 UART 或实体显示。
 
 ## 1. 核心模型
 
@@ -49,10 +51,9 @@ Sentence/Navigate ──A，唯一且信息有效的直接邻居──► Senten
        ▲                                               │ B：切换L BEFORE/R AFTER
        │                                               │ A：发WORD_PULL(req,pos)
        │ 收到匹配的定位OFFER并插入                       ▼
-       └──────────────────────────────────────── pull pending
-                                                       │ B：取消本机pull
-                                                       ▼
-                                                Sentence/InsertSide
+       ├──────────────────────────────────────── pull pending
+       │                                               │ B：取消本机pull
+       └───────────────────────────────────────────────┘
 ```
 
 补充规则：
@@ -78,7 +79,7 @@ Sentence/Navigate ──A，唯一且信息有效的直接邻居──► Senten
 | Sentence / Navigate，两个邻居 | 同上 | 显示 `CHOOSE ONE LINK`，不发送 | 清句并回 Picker |
 | Sentence / DeleteConfirm | 忽略，防止确认目标变化 | 再按 A：删除 cursor 词并回 Navigate | 取消删除并回 Navigate |
 | Sentence / InsertSide，无 pull pending | 仍改变内部 cursor；发送时按最新 cursor 计算位置 | 未满 12 词时向唯一邻居发 `WORD_PULL`；满句显示 `SENTENCE FULL/BUSY` | 在 `L:BEFORE` 与 `R:AFTER` 间切换 |
-| pull pending | Sentence 中只移动 cursor，不改变已经发出的 `pos` | 忽略 | 取消本机 pull，保留 InsertSide |
+| pull pending | Sentence 中只移动 cursor，不改变已经发出的 `pos` | 忽略 | 取消本机 pull，回 Navigate |
 
 注意：InsertSide 页面显示候选词和 L/R 选项，不显示句子本身；若在此页旋转编码器，内部 cursor 会改变但页面不会展示新的目标词。因此可预测的操作顺序是先在 Navigate 选好词，再按 A 进入 InsertSide。
 
@@ -279,7 +280,7 @@ NVS magic 为 `WIH4`，保存：
 
 因此，“断线保留 req 重试”仅描述运行中的热插拔；不能写成“断电后续传”。
 
-## 10. 软件测试：40 项
+## 10. 软件测试：46 项
 
 运行：
 
@@ -287,7 +288,7 @@ NVS magic 为 `WIH4`，保存：
 pio test -e native
 ```
 
-native 使用同一套协议、Picker、Sentence 和 WordGame 源码，以固定随机种子、虚拟时间、脚本按键和可控虚拟 UART 测试。套件共 40 项：5 项基础协议/JSON、8 项协议故障、27 项游戏/句子编辑。
+native 使用同一套协议、Picker、Sentence 和 WordGame 源码，以固定随机种子、虚拟时间、脚本按键和可控虚拟 UART 测试。套件共 46 项：5 项基础协议/JSON、8 项协议故障、33 项游戏/句子编辑。双板 Web 模拟器另有 14 项 Python 模型与 HTTP 测试，命令见 [模拟器使用说明](simulator.md#8-测试)。
 
 ### 10.1 基础协议与 JSON（5）
 
@@ -312,7 +313,7 @@ native 使用同一套协议、Picker、Sentence 和 WordGame 源码，以固定
 | 12 | `test_busy_and_interbyte_timeout` | LBUSY、字节间超时 |
 | 13 | `test_crc_prefix_resync` | CRC 前缀噪声后的重同步 |
 
-### 10.3 Picker、传输和句子编辑（27）
+### 10.3 Picker、传输和句子编辑（33）
 
 | # | 测试 | 覆盖点 |
 |---:|---|---|
@@ -343,12 +344,20 @@ native 使用同一套协议、Picker、Sentence 和 WordGame 源码，以固定
 | 38 | `test_insert_mode_disconnect_and_cancel_return_to_navigation` | 插入页断线/取消后返回导航，可继续删除 |
 | 39 | `test_remote_candidate_change_requests_display` | 对端换词更新候选并请求重绘 |
 | 40 | `test_incomplete_receipts_are_not_evicted` | 未完成 receipt 不淘汰、DONE 后回收 |
+| 41 | `test_delete_last_word_keeps_empty_sentence_navigation` | 删除最后一词后停留空 Sentence/Navigate，cursor 归零且 A 不误进入其他模式 |
+| 42 | `test_cancelled_offer_does_not_retry` | B 取消 offer 后不再重试，候选词保持不变 |
+| 43 | `test_cancelled_pull_does_not_retry` | B 取消 pull 后回 Navigate、不再重试，对端不建立 offer |
+| 44 | `test_pull_position_is_fixed_when_cursor_moves` | pull 发出后移动 cursor 不改固定 pos，新词仍插到原请求位置 |
+| 45 | `test_delete_confirm_is_stable_when_link_connects` | DeleteConfirm 期间建立连接不改变删除目标或模式 |
+| 46 | `test_second_link_exits_insert_side` | 第二邻居出现时退出 InsertSide，禁止自动选目标或发起 pull |
 
 这些测试不验证字体在实际面板上的效果、电气安全、真实 UART 时序、PSRAM、休眠电流或残影。
 
 ## 11. 实板手动验收步骤
 
-以下步骤均**尚待实板执行**。接线、电气风险和 RGB 差异见 `wiring.md`；显示和休眠的完整验收见 `display-design-requirements.md`。
+本分支已在本机一块 N8R8 上完成有限的启动检查：固件烧录哈希校验通过；启动日志确认 8 MB PSRAM；旧 WIH3 状态成功迁移并恢复 Picker；墨水屏完成全刷和快速局刷；空闲进入休眠前完成 NVS 保存，未再出现重启。首次实板启动曾在 NVS 迁移时因主任务栈上的多个大状态副本触发 `Double exception`，现已将启动与保存缓冲区改为静态存储并复测通过。
+
+以下完整步骤仍**尚待实板执行**，尤其是双板握手、收词后的 Sentence 页面、删除、定位 pull 和故障恢复。本机写入真实节点 ID 后已确认 `configured=1、uart=1、identity=1`；当前 `links=0`，另一块板仍需配置真实 ID，不能记为双板通过。接线、电气风险和 RGB 差异见 `wiring.md`；显示和休眠的完整验收见 `display-design-requirements.md`。
 
 ### 11.1 准备和基本交互
 
@@ -384,7 +393,7 @@ native 使用同一套协议、Picker、Sentence 和 WordGame 源码，以固定
 
 ## 12. 已知限制
 
-- **无硬件验证**：当前句子编辑、显示、电气和真实 UART 尚未完成实板验收；40 项 native 测试通过不等于硬件通过。
+- **完整硬件验收未完成**：仅通过第 11 节所述单板启动、Picker 显示和保存检查；Sentence 实板交互、电气和真实 UART 尚未验收。46 项 native 测试和 14 项模拟器测试通过不等于硬件通过。
 - **ASCII 字体**：当前 FreeSans/内置字体路径只保证内置英文词库的 ASCII 字形。协议能接收其他 UTF-8 文本，但非 ASCII 字形和宽度显示未实现。
 - **真实 ID 仍需配置**：`src/config.h` 中的 kit、recorder、member 占位/示例值必须替换成实际套件配置，未知成员和角色不匹配会被拒绝。
 - **CAPTURE/READY 未实现**：记录者冻结保存事务、句子历史 Flash 日志和电脑底座导出不在当前实现内。

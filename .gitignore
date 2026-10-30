@@ -16,6 +16,10 @@ out/
 *.swp
 *.swo
 
+# Python
+__pycache__/
+*.py[cod]
+
 # OS files
 .DS_Store
 Thumbs.db

@@ -2,7 +2,7 @@
 
 屏幕规格：200×200 黑白，SPI 接口，驱动板 8PIN 排座（2.54mm）。V2.1 驱动板自带电平转换，3.3V 直连即可。屏幕背面有 V2 标签；若实际是 V1 老板（IL0373），需把 `src/display.h` 中的 `GxEPD2_154_D67` 换成 `GxEPD2_154`。
 
-所有板固定使用 **N8R8：8 MB QIO Flash + 8 MB OPI PSRAM**。唯一固件环境及默认环境为 `esp32-s3-devkitc-1-n8r8`，直接运行 `pio run` / `pio run -t upload`，无需 `-e`。GPIO35–37 专用于存储器，不能接外设；当前 UART/屏幕/编码器引脚不占用这些存储器引脚。
+所有硬件固定使用 **N8R8：8 MB QIO Flash + 8 MB OPI PSRAM**，不混用其他 Flash/PSRAM 容量或模式。唯一固件环境及默认环境为 `esp32-s3-devkitc-1-n8r8`，直接运行 `pio run` / `pio run -t upload`（或 `pio upload`），无需 `-e`。这些默认构建和烧录命令**只生成、只烧录 N8R8 固件**；`native` 环境只用于主机测试。配置固定为 `qio_opi`、8 MB 分区和 `BOARD_HAS_PSRAM`。GPIO35–37 专用于存储器，不能接外设；当前 UART/屏幕/编码器引脚不占用这些存储器引脚。
 
 DevKitC PCB 版本仍要区分：RGB LED 在 **v1.1 是 GPIO38、v1.0 是 GPIO48**，可通过 `PIN_RGB_LED` 覆盖；这与固定 N8R8 存储配置是两件事。
 
@@ -38,7 +38,26 @@ DevKitC PCB 版本仍要区分：RGB LED 在 **v1.1 是 GPIO38、v1.0 是 GPIO48
 | 左邻 L | UART1 | GPIO17 | GPIO18 | 接左侧模块的 R 口 |
 | 右邻 R | UART2 | GPIO15 | GPIO16 | 接右侧模块的 L 口 |
 
-两端均为 115200、8N1、3.3V UART；TX 对 RX、RX 对 TX，并必须共地。固件为每口配置 4096 B RX/TX 缓冲并记录 UART 错误计数，BUSY 等待期间继续服务协议。地触点应先接后断；不跨模块连接电池正极、3.3V 或 5V。烧录前还要把 `src/config.h` 的 kit、recorder 和最多三个 member ID 配成实际设备值，占位 ID 会拒绝通信。
+两端均为 115200、8N1、3.3V UART；TX 对 RX、RX 对 TX，并必须共地。固件为每口配置 4096 B RX/TX 缓冲并记录 UART 错误计数，BUSY 等待期间继续服务协议。地触点应先接后断；不跨模块连接电池正极、3.3V 或 5V。
+
+以双板 **A.R ↔ B.L** 为例，断电后按下表逐点连接并复核：
+
+| 信号 | 板 A（R 口，UART2） | 方向 | 板 B（L 口，UART1） |
+|---|---|---|---|
+| A 发送 / B 接收 | GPIO15（TX） | → | GPIO18（RX） |
+| B 发送 / A 接收 | GPIO16（RX） | ← | GPIO17（TX） |
+| 公共参考地 | GND | ↔ | GND |
+
+这里只需交叉 TX/RX 并共地，不连接两板电源正极。反向使用 A.L ↔ B.R 时也按各口引脚表交叉连接，不要把两个 TX 或两个 RX 直接相连。
+
+### 真实 ID 准备
+
+1. 先取得套件内每块板的实际 16 位十六进制节点 ID。固件节点 ID 由芯片 MAC 派生，可结合串口启动日志中的 `wlp2: ... id=...` 核对；不要把示例 member ID 当成真实 ID。
+2. 在所有板的 `src/config.h` 中配置一致的真实套件资料：`WIH_KIT_ID` 为实际 32 位十六进制 kit ID，`WIH_RECORDER_ID` 为实际记录者节点 ID，`WIH_MEMBER_1_ID`～`WIH_MEMBER_3_ID` 为实际套件成员表。每块板自身及 recorder 都必须在成员表中。
+3. recorder 角色由“本机节点 ID 是否等于 `WIH_RECORDER_ID`”自动确定，其余为 Word 角色。角色、kit 或成员表不一致会拒绝通信。
+4. 修改配置后重新执行默认 N8R8 构建并烧录到每一块对应硬件，再进行双板握手。占位 ID、未知成员或沿用另一套件的配置都不能作为联机验收配置。
+
+当前本机板已将 `WIH_MEMBER_1_ID` 配为实际节点 `0000ac3a2a6b4580`，烧录后启动日志为 `configured=1、uart=1、identity=1`。另一台电脑必须先取得第二块板的实际 ID，把它写入同一成员表，并确保两块板的 kit、recorder 和全部 member 配置一致；在此之前 `links=0` 是预期现象。
 
 **直连 GPIO 不等于可安全带电插拔。** 原型每个 L/R 邻接口建议使用一片 SN74LVC2G125：两个通道分别隔离本机 TX 和远端 RX，`/OE` 默认上拉禁用，信号串联约 220Ω，缓冲器输入及 MCU RX 用 10k～47kΩ 上拉保持空闲高，触点旁增加低电感 TVS 回流。地触点必须以机械 first-mate/last-break 保证先接后断，镜像和 TX/RX 逐点导通验证。阻值只是调试起点，不是厂家指定值；`Ioff` 只保证器件 VCC=0V 时的高阻/漏电特性，不保证所有电源斜坡和系统级 ESD。
 
