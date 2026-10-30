@@ -34,13 +34,13 @@ pio run -t upload
 python3 simulator/server.py
 ```
 
-浏览器打开 `http://127.0.0.1:8000/`；可用 `--port` 换端口。页面支持设置 A/B 候选词、连接/断开 A.R↔B.L、编码器与 A/B 按钮、逐步推进 offer/pull、删除、清句、pending 和日志。完整操作与 API 见 **[docs/simulator.md](docs/simulator.md)**。
+浏览器打开 `http://127.0.0.1:8000/`；可用 `--port` 换端口。页面支持设置 A/B 候选词、连接/断开 A.R↔B.L、编码器与 A/B 按钮、空闲时自动完成 offer/pull、异常 pending 重试、删除、清句和日志。完整操作与 API 见 **[docs/simulator.md](docs/simulator.md)**。
 
 模拟器是确定性交互模型，不执行真实 WLP2 帧，也不验证固件或真实 UART。它允许中文 UTF-8 输入，但真实固件仍只有 ASCII 显示保证。
 
 ## 显示、通信与保存
 
-- **显示**：三行选词页和 200×200 句子页；句子按顺序换行，cursor 词反显，长词缩略。单机无操作约 5 秒深睡；联机或等待传词时只休眠屏幕并维持 UART。
+- **显示与持续监听**：三行选词页和 200×200 句子页；句子按顺序换行，cursor 词反显，长词缩略。无操作约 5 秒后只让墨水屏 hibernate，MCU 不进入深睡，UART、握手、`game.tick()` 和重试始终运行；连接、来词或本地输入会立即重新初始化并全刷显示，无需 A 唤醒。
 - **通信**：WLP2 双 UART 握手、身份/套件校验、sid 心跳、CRC32、LACK/LBUSY、重传去重、NODE_INFO 邻接核对和最多三块短链转发。词传输要求直接邻居。
 - **持久化**：WIH4 保存 Picker、句子顺序、cursor、来源和 receipts，并迁移 NVS WIH1/WIH2/WIH3。编辑模式与 offer/pull pending **不保证跨断电恢复**；断线重试不等于断电续传。
 

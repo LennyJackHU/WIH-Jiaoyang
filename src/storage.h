@@ -23,8 +23,3 @@ struct PersistState {
 // NVS (flash) persistence - survives power cycles.
 bool storageLoadNvs(PersistState& out);
 bool storageSaveNvs(const PersistState& state);
-
-// RTC memory mirror - survives deep sleep, not power loss.
-bool rtcStateValid();
-void rtcStateSave(const PersistState& state);
-bool rtcStateLoad(PersistState& out);

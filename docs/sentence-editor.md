@@ -276,7 +276,9 @@ NVS magic 为 `WIH4`，保存：
 - **offer pending、pull pending、DONE 的内存发送状态不保存。** 断电前正在等待的 req 不保证重启后自动继续。
 - **Navigate/DeleteConfirm/InsertSide、BEFORE/AFTER 选项不作为编辑会话恢复。** 有句子时重启回 Sentence/Navigate，无句子时回 Picker，BEFORE/AFTER 回默认值。
 - 句子、cursor、来源和 receipts 的保存不代表一次未完成的分布式传输能原子恢复。若一端已保存入句而另一端在 ACCEPT 前断电，重启后可能保留句子但不再保留原 pending；需要用户重新操作，旧 req 的防重放记录仍防止重复插入。
-- RTC mirror 用于深睡恢复，NVS 用于普通复位/重新上电。深睡唤醒优先恢复 RTC；失败才尝试 NVS。
+- 普通复位和重新上电只从 NVS 恢复；当前固件不包含 MCU 深睡、RTC 唤醒或 RTC 状态镜像路径。
+
+无操作约 5 秒后只让墨水屏 hibernate，MCU、UART、握手、`game.tick()` 和重试继续运行。屏幕已休眠且无绘制变化时不会反复保存；连接、来词或本地输入会刷新空闲计时并立即全刷恢复显示，不需要按 A 唤醒。即时 OFFER/PULL 不等待屏幕恢复。
 
 因此，“断线保留 req 重试”仅描述运行中的热插拔；不能写成“断电后续传”。
 
@@ -385,10 +387,10 @@ native 使用同一套协议、Picker、Sentence 和 WordGame 源码，以固定
 
 14. 分别在 OFFER 前、入句后 ACCEPT 前、PULL 后、定位 OFFER 后制造断线/接触抖动。重连后每笔 req 只能入句一次，发送方仅在 ACCEPT 后随机，句子不得因拔线消失。
 15. 在上述各阶段按 B 取消本机 pending，确认本机不再重试；同时记录对端已入句内容不会远程撤销这一边界。
-16. 深睡唤醒、普通复位、完全断电重上电分别检查句子顺序、cursor 和已收内容；重启后应回 Navigate 而不是 DeleteConfirm/InsertSide，pending 不应被宣称会自动续传。
+16. 普通复位和完全断电重上电分别检查 NVS 中的句子顺序、cursor 和已收内容；重启后应回 Navigate 而不是 DeleteConfirm/InsertSide，pending 不应被宣称会自动续传。另保持无操作超过 10 秒，确认面板休眠后 `alive` 和 UART 仍持续。
 17. 在 ACCEPT 前断电形成“一端入句、另一端 pending 丢失”的边界情况，确认旧 receipt 不会导致重复插入；需要继续时由用户发起新操作。
 18. 用 1、2、12 词和长 ASCII 词检查换行、cursor 反显、省略号、InsertSide 候选页和页脚；连续局刷后检查残影并按设计执行全刷。
-19. 实测真实 UART 延迟、单侧掉电倒灌、电源斜坡、单线断开、ESD、联机功耗和深睡电流。native 的虚拟时间不能替代这些结果。
+19. 实测真实 UART 延迟、单侧掉电倒灌、电源斜坡、单线断开、ESD、联机功耗和持续监听功耗。native 的虚拟时间不能替代这些结果。
 20. 确认没有把 CAPTURE/READY 当作已实现的冻结保存流程；相关记录者事务和电脑底座导出仍需另行开发验收。
 
 ## 12. 已知限制

@@ -1,8 +1,6 @@
 #include "storage.h"
 #include <Preferences.h>
 
-static RTC_DATA_ATTR PersistState rtcBlob;
-
 struct LegacyPersistStateV1 {
     uint32_t magic;
     int16_t hist[HISTORY_LEN];
@@ -53,21 +51,6 @@ static_assert(sizeof(LegacyPersistStateV2) == 268, "WIH2 layout changed");
 static const uint32_t LEGACY_STATE_MAGIC_V1 = 0x57494831u;
 static const uint32_t LEGACY_STATE_MAGIC_V2 = 0x57494832u;
 static const uint32_t LEGACY_STATE_MAGIC_V3 = 0x57494833u;
-
-bool rtcStateValid() {
-    return rtcBlob.magic == STATE_MAGIC;
-}
-
-void rtcStateSave(const PersistState& state) {
-    rtcBlob = state;
-    rtcBlob.magic = STATE_MAGIC;
-}
-
-bool rtcStateLoad(PersistState& out) {
-    if (!rtcStateValid()) return false;
-    out = rtcBlob;
-    return true;
-}
 
 static void migratePicker(PersistState& out, uint32_t magic, const int16_t* hist,
                           uint8_t first, uint8_t cur, uint8_t last, uint8_t confirmed) {

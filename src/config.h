@@ -9,7 +9,7 @@
 #define PIN_EPD_DIN  11
 
 // ---- Rotary encoder ----
-#define PIN_ENC_A 5   // CLK, PCNT input; not a wake source
+#define PIN_ENC_A 5   // CLK, PCNT input
 #define PIN_ENC_B 6   // DT
 #define PIN_ENC_SW 4  // push switch, reserved (currently unused)
 
@@ -39,7 +39,7 @@
 #define WIH_MEMBER_1_ID "0000ac3a2a6b4580"
 #endif
 #ifndef WIH_MEMBER_2_ID
-#define WIH_MEMBER_2_ID "0000000000000002"
+#define WIH_MEMBER_2_ID "0000683d2a6b4580"
 #endif
 #ifndef WIH_MEMBER_3_ID
 #define WIH_MEMBER_3_ID "0000000000000003"

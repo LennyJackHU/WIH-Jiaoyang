@@ -1,5 +1,4 @@
 #include <Arduino.h>
-#include <driver/rtc_io.h>
 #include <esp_random.h>
 #include <esp32-hal-psram.h>
 #include "config.h"
@@ -22,7 +21,6 @@ static uint32_t lastDrawMs = 0;
 static uint32_t partialCount = 0;
 static bool epdReady = false;
 static bool forceFullRefresh = false;
-static bool ignoreButtonsUntilRelease = false;
 static bool nvsDirty = false;
 static uint32_t nextNvsRetryMs = 0;
 
@@ -96,10 +94,9 @@ static void markDirty(DisplayArea area) {
 }
 
 static void handleButtons(uint32_t now) {
-    if (game.consumeDisplayRequest()) markDirty(DisplayArea::Full);
-    if (ignoreButtonsUntilRelease) {
-        if (inputButtonsReleased()) ignoreButtonsUntilRelease = false;
-        return;
+    if (game.consumeDisplayRequest()) {
+        markDirty(DisplayArea::Full);
+        lastActivityMs = now;
     }
     switch (inputPollButtons()) {
     case BtnEvent::CONFIRM: {
@@ -181,14 +178,16 @@ static void draw(bool partial) {
                   (unsigned long)(millis() - drawStartMs));
     if (!full) partialCount++;
     lastDrawMs = millis();
-    if (game.consumeDisplayRequest()) markDirty(DisplayArea::Full);
+    if (game.consumeDisplayRequest()) {
+        markDirty(DisplayArea::Full);
+        lastActivityMs = lastDrawMs;
+    }
 }
 
 static bool saveAll() {
     static PersistState s;
     memset(&s, 0, sizeof(s));
     fillState(s);
-    rtcStateSave(s);
     bool ok = storageSaveNvs(s);
     if (ok) {
         nvsDirty = false;
@@ -209,54 +208,18 @@ static void serviceNvs(uint32_t now) {
     }
 }
 
-static bool wakePinsIdle() {
-    return inputButtonsReleased();
-}
-
-static void goToSleep() {
-    if (!wakePinsIdle()) {
-        static uint32_t lastLog = 0;
-        if (millis() - lastLog > 1000) {
-            lastLog = millis();
-            Serial.printf("sleep blocked: btnA=%d btnB=%d\n",
-                          digitalRead(PIN_BTN_A), digitalRead(PIN_BTN_B));
-        }
-        return;
-    }
+static void hibernateDisplayWhenIdle() {
+    if (!epdReady && !dirty) return;
     if (dirty) draw(false);
     if (dirty) return;
     if (nvsDirty && static_cast<int32_t>(millis() - nextNvsRetryMs) < 0) return;
     if (!saveAll()) return;
-    if (node.connectedCount() > 0 || game.transferPending() || game.pullPending()) {
-        if (epdReady) {
-            displayHibernate();
-            epdReady = false;
-            forceFullRefresh = true;
-        }
-        return;
+    if (epdReady) {
+        displayHibernate();
+        epdReady = false;
+        forceFullRefresh = true;
+        Serial.println("display: hibernate; MCU/UART awake");
     }
-    if (epdReady) displayHibernate();
-
-    int wakeLevel = inputPressedLevel(PIN_BTN_A);
-    esp_err_t err = esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_BTN_A, wakeLevel);
-    if (err == ESP_OK) err = rtc_gpio_init((gpio_num_t)PIN_BTN_A);
-    if (err == ESP_OK) err = rtc_gpio_set_direction((gpio_num_t)PIN_BTN_A, RTC_GPIO_MODE_INPUT_ONLY);
-    if (err == ESP_OK) {
-        if (wakeLevel == 0) {
-            err = rtc_gpio_pullup_en((gpio_num_t)PIN_BTN_A);
-            if (err == ESP_OK) err = rtc_gpio_pulldown_dis((gpio_num_t)PIN_BTN_A);
-        } else {
-            err = rtc_gpio_pullup_dis((gpio_num_t)PIN_BTN_A);
-            if (err == ESP_OK) err = rtc_gpio_pulldown_en((gpio_num_t)PIN_BTN_A);
-        }
-    }
-    if (err != ESP_OK) {
-        Serial.printf("sleep wakeup config failed: %d\n", err);
-        return;
-    }
-    Serial.flush();
-    delay(20);
-    esp_deep_sleep_start();
 }
 
 void setup() {
@@ -264,9 +227,7 @@ void setup() {
     neopixelWrite(PIN_RGB_LED, 0, 0, 0);
     uint32_t t0 = millis();
     while (!Serial && millis() - t0 < 2000) delay(10);
-    esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-    bool wokeFromSleep = cause == ESP_SLEEP_WAKEUP_EXT0 || cause == ESP_SLEEP_WAKEUP_EXT1;
-    inputInit(wokeFromSleep);
+    inputInit();
     Serial.printf("buttons: A pressedLevel=%d B pressedLevel=%d\n",
                   inputPressedLevel(PIN_BTN_A), inputPressedLevel(PIN_BTN_B));
     bool uartReady = wlp2UartInit();
@@ -276,7 +237,7 @@ void setup() {
     protocolReady = uartReady && identityReady;
     Serial.printf("wlp2: configured=%d uart=%d identity=%d id=%s links=%u\n",
                   protocolReady, uartReady, identityReady, identity.id, node.connectedCount());
-    Serial.printf("boot: reset=%d wakeup=%d\n", esp_reset_reason(), cause);
+    Serial.printf("boot: reset=%d\n", esp_reset_reason());
 #ifdef BOARD_HAS_PSRAM
     Serial.printf("psram: found=%d size=%u free=%u\n", psramFound(),
                   (unsigned)ESP.getPsramSize(), (unsigned)ESP.getFreePsram());
@@ -284,18 +245,13 @@ void setup() {
     Serial.println("psram: disabled");
 #endif
     static PersistState s;
-    ignoreButtonsUntilRelease = wokeFromSleep;
 #if FRESH_RANDOM_ON_BOOT
     Serial.println("fresh start (test mode)");
     freshStart();
     dirty = true;
     draw(false);
 #else
-    if (wokeFromSleep && rtcStateLoad(s) && applyState(s)) {
-        Serial.printf("wake from deep sleep, word=%s\n", game.currentWord());
-        forceFullRefresh = true;
-        game.consumeDisplayRequest();
-    } else if (storageLoadNvs(s) && applyState(s)) {
+    if (storageLoadNvs(s) && applyState(s)) {
         Serial.printf("restored from NVS, word=%s\n", game.currentWord());
         dirty = true;
         draw(false);
@@ -313,7 +269,10 @@ void setup() {
 void loop() {
     uint32_t now = millis();
     game.tick(now);
-    if (game.consumeDisplayRequest()) markDirty(DisplayArea::Full);
+    if (game.consumeDisplayRequest()) {
+        markDirty(DisplayArea::Full);
+        lastActivityMs = now;
+    }
     serviceNvs(now);
 
     static uint32_t lastBeat = 0;
@@ -337,6 +296,6 @@ void loop() {
     handleButtons(now);
     serviceNvs(now);
 
-    if (now - lastActivityMs >= SLEEP_IDLE_MS) goToSleep();
+    if (now - lastActivityMs >= SLEEP_IDLE_MS) hibernateDisplayWhenIdle();
     else if (dirty && now - lastDrawMs >= DISPLAY_THROTTLE_MS) draw(true);
 }

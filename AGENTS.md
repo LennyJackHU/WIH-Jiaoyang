@@ -64,3 +64,10 @@ command -v pio
 - WIH4 的 `PersistState` 包含有序句子、来源和 receipts，体积达数千字节。不要在 Arduino 主任务栈上叠加多个此类副本；启动加载和 `saveAll()` 使用静态缓冲区，保存前逐次清零。
 - 若启动在 `psram: found=1` 后出现 `Double exception`，先用本机 `xtensa-esp32s3-elf-addr2line` 解码 `.pio/build/esp32-s3-devkitc-1-n8r8/firmware.elf`，不要仅凭 native 测试通过判断实板安全。
 - 当前分支已实测单板启动、WIH3→WIH4 迁移、N8R8 PSRAM、屏幕刷新和休眠前保存；这不等于双板 UART 或全部句子交互已验收。
+
+## 持续监听与双板 SOP
+
+- 无操作约 5 秒后只允许墨水屏 hibernate，不得调用 `esp_deep_sleep_start()`。MCU、UART、`game.tick()` 和周期 `alive` 日志必须持续运行。
+- 屏幕已休眠且 `dirty=false` 时直接返回，避免反复 `saveAll()` 写 NVS。连接、来词和本地输入要刷新空闲计时；下一次重绘先全刷，传输不等待屏幕恢复。
+- 修改→46 项 native+14 项 Web 测试→N8R8 构建→实板超过 5 秒持续监听验证→提交→推送→PR→另一块板同步提交并烧录→Pogo 验收，完整步骤见 `docs/hardware-sop.md`。
+- 当前双板 ID：第一板 `0000ac3a2a6b4580`，第二板 `0000683d2a6b4580`。两板必须使用一致的 kit/member/recorder 配置。

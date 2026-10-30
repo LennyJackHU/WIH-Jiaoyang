@@ -1,6 +1,5 @@
 #include "input.h"
 #include <ESP32Encoder.h>
-#include <esp_attr.h>
 
 // Counts per detent of a typical EC11 encoder in full-quad mode.
 static const int ENC_COUNTS_PER_STEP = 4;
@@ -19,11 +18,8 @@ struct DebouncedButton {
 
 static DebouncedButton btnA;
 static DebouncedButton btnB;
-static RTC_DATA_ATTR bool rtcAActiveLow;
-static RTC_DATA_ATTR bool rtcBActiveLow;
-static RTC_DATA_ATTR bool rtcPolarityValid;
 
-static void buttonRestore(DebouncedButton& b, uint8_t pin, bool activeLow) {
+static void buttonConfigure(DebouncedButton& b, uint8_t pin, bool activeLow) {
     b.pin = pin;
     b.activeLow = activeLow;
     b.lastChangeMs = 0;
@@ -42,32 +38,20 @@ static void buttonInit(DebouncedButton& b, uint8_t pin) {
         samples++;
         delay(2);
     }
-    buttonRestore(b, pin, highs * 2 >= samples);
+    buttonConfigure(b, pin, highs * 2 >= samples);
 }
 
 static bool pressedLevel(const DebouncedButton& b) {
     return b.activeLow ? LOW : HIGH;
 }
 
-static bool isPressed(const DebouncedButton& b) {
-    return digitalRead(b.pin) == pressedLevel(b);
-}
-
-void inputInit(bool restorePolarity) {
+void inputInit() {
     ESP32Encoder::useInternalWeakPullResistors = puType::up;
     encoder.attachFullQuad(PIN_ENC_A, PIN_ENC_B);
     encoder.setFilter(1023);
     encoder.clearCount();
-    if (restorePolarity && rtcPolarityValid) {
-        buttonRestore(btnA, PIN_BTN_A, rtcAActiveLow);
-        buttonRestore(btnB, PIN_BTN_B, rtcBActiveLow);
-    } else {
-        buttonInit(btnA, PIN_BTN_A);
-        buttonInit(btnB, PIN_BTN_B);
-        rtcAActiveLow = btnA.activeLow;
-        rtcBActiveLow = btnB.activeLow;
-        rtcPolarityValid = true;
-    }
+    buttonInit(btnA, PIN_BTN_A);
+    buttonInit(btnB, PIN_BTN_B);
 }
 
 int inputReadEncoderSteps() {
@@ -99,10 +83,6 @@ BtnEvent inputPollButtons() {
     if (pressed(btnA)) return BtnEvent::CONFIRM;
     if (pressed(btnB)) return BtnEvent::REFRESH;
     return BtnEvent::NONE;
-}
-
-bool inputButtonsReleased() {
-    return !isPressed(btnA) && !isPressed(btnB);
 }
 
 int inputPressedLevel(uint8_t pin) {
