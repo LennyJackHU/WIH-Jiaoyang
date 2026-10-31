@@ -4,7 +4,7 @@
 
 enum class BtnEvent { NONE, CONFIRM, REFRESH };
 
-void inputInit();
+void inputInit(bool restorePolarity = false);
 // Net encoder steps since the last call (positive = clockwise).
 // Hardware PCNT keeps counting while the display blocks.
 int inputReadEncoderSteps();
