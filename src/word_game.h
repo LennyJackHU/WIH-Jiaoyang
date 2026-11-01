@@ -57,6 +57,8 @@ public:
     void tick(uint32_t now);
     void pressConfirm(uint32_t now);
     void pressRefresh(uint32_t now);
+    void pressEdit(uint32_t now);
+    void pressClear(uint32_t now);
     void turnEncoder(int steps, uint32_t now);
 
     void onLinkChanged(wlp2::Port port) override;

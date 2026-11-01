@@ -183,10 +183,45 @@ void WordGame::clearPull() {
     nextPullMs_ = 0;
 }
 
+void WordGame::pressEdit(uint32_t now) {
+    now_ = now;
+    if (pending_ || pullPending_) return;
+    editMode_ = SentenceEdit::Navigate;
+    insertAfter_ = false;
+    if (view_ == View::Picker) {
+        if (sentence_.empty() && sentence_.insert(0, currentWord(), "")) saveRequested_ = true;
+        view_ = View::Sentence;
+    } else {
+        view_ = View::Picker;
+    }
+    statusUntil_ = 0;
+    setStatus(Status::None);
+    changed();
+}
+
+void WordGame::pressClear(uint32_t now) {
+    now_ = now;
+    if (view_ != View::Sentence || pending_ || pullPending_) return;
+    if (editMode_ == SentenceEdit::ClearConfirm) {
+        clearSentence();
+        setStatus(Status::None);
+        return;
+    }
+    editMode_ = SentenceEdit::ClearConfirm;
+    setStatus(Status::None);
+    changed();
+}
+
 void WordGame::pressConfirm(uint32_t now) {
     now_ = now;
     if (pending_ || pullPending_) return;
     if (view_ == View::Sentence) {
+        if (editMode_ == SentenceEdit::ClearConfirm) {
+            editMode_ = SentenceEdit::Navigate;
+            setStatus(Status::None);
+            changed();
+            return;
+        }
         if (editMode_ == SentenceEdit::DeleteConfirm) {
             if (sentence_.empty()) return;
             sentence_.remove(sentence_.cursor());
@@ -284,7 +319,7 @@ void WordGame::pressRefresh(uint32_t now) {
         return;
     }
     if (view_ == View::Sentence) {
-        if (editMode_ == SentenceEdit::DeleteConfirm) {
+        if (editMode_ == SentenceEdit::DeleteConfirm || editMode_ == SentenceEdit::ClearConfirm) {
             editMode_ = SentenceEdit::Navigate;
             setStatus(Status::None);
             changed();
@@ -315,7 +350,8 @@ void WordGame::turnEncoder(int steps, uint32_t now) {
     now_ = now;
     if (steps == 0) return;
     if (view_ == View::Sentence) {
-        if (editMode_ == SentenceEdit::DeleteConfirm || sentence_.empty()) return;
+        if (editMode_ == SentenceEdit::DeleteConfirm || editMode_ == SentenceEdit::ClearConfirm ||
+            sentence_.empty()) return;
         uint8_t previous = sentence_.cursor();
         sentence_.moveCursor(steps);
         if (sentence_.cursor() != previous) changed();
