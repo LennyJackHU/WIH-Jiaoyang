@@ -2,7 +2,7 @@
 #include <Arduino.h>
 #include "config.h"
 
-enum class BtnEvent { NONE, CONFIRM, REFRESH };
+enum class BtnEvent { NONE, CONFIRM, REFRESH, EDIT, CLEAR };
 
 void inputInit();
 // Net encoder steps since the last call (positive = clockwise).

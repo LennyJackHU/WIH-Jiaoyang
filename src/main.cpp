@@ -129,6 +129,22 @@ static void handleButtons(uint32_t now) {
         lastActivityMs = now;
         break;
     }
+    case BtnEvent::EDIT:
+        game.pressEdit(now);
+        game.consumeDisplayRequest();
+        markDirty(DisplayArea::Full);
+        Serial.printf("button EDIT: view=%s\n",
+                      game.view() == WordGame::View::Sentence ? "sentence" : "picker");
+        lastActivityMs = now;
+        break;
+    case BtnEvent::CLEAR:
+        game.pressClear(now);
+        game.consumeDisplayRequest();
+        markDirty(DisplayArea::Full);
+        Serial.printf("button CLEAR: mode=%d view=%s\n", static_cast<int>(game.editMode()),
+                      game.view() == WordGame::View::Sentence ? "sentence" : "picker");
+        lastActivityMs = now;
+        break;
     default:
         break;
     }
