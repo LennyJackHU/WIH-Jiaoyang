@@ -1,0 +1,9 @@
+{
+  "provider": "siliconflow",
+  "baseUrl": "https://api.siliconflow.cn/v1/chat/completions",
+  "model": "deepseek-ai/DeepSeek-V3.2",
+  "learnModel": "deepseek-ai/DeepSeek-V3.2",
+  "apiKey": "在这里填入你自己的 SiliconFlow API Key",
+  "temperature": 0.8,
+  "timeout": 90
+}
