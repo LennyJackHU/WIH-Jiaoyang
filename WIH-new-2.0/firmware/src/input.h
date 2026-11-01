@@ -1,0 +1,14 @@
+#pragma once
+#include <Arduino.h>
+#include "config.h"
+
+enum class BtnEvent { NONE, CONFIRM, REFRESH, EDIT, CLEAR };
+
+void inputInit();
+// Net encoder steps since the last call (positive = clockwise).
+// Hardware PCNT keeps counting while the display blocks.
+int inputReadEncoderSteps();
+BtnEvent inputPollButtons();
+
+// Level (0/1) that means "pressed" for the given button pin.
+int inputPressedLevel(uint8_t pin);
