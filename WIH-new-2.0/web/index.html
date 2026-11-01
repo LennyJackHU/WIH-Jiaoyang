@@ -1,0 +1,1598 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Words in Hand · 把语言拼出来</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Noto+Serif+SC:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ============ 莫兰迪色系 · 设计变量 ============ */
+  :root {
+    --paper:        #E7E0D3;   /* 米灰纸面 */
+    --paper-deep:   #DCD3C2;
+    --ink:          #33302A;   /* 墨黑 */
+    --ink-soft:     #6B645A;
+    --ink-faint:    #9B9489;
+    --accent:       #8C3B36;   /* 暗红 */
+    --accent-deep:  #71302C;
+    --sage:         #A9B4A0;   /* 鼠尾草绿 */
+    --blue:         #97A6B2;   /* 灰蓝 */
+    --coral:        #C89B8C;   /* 珊瑚 */
+    --straw:        #D6C49B;   /* 鹅黄 */
+    --tile-ink:     #3B3730;
+    --ok:           #7C8F6E;   /* 连接绿 */
+    --line:         rgba(51, 48, 42, .18);
+    --serif-en: "Cormorant Garamond", "Sorts Mill Goudy", Georgia, serif;
+    --serif-cn: "Noto Serif SC", "思源宋体", "Songti SC", serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: var(--serif-cn);
+    color: var(--ink);
+    background:
+      radial-gradient(1200px 800px at 15% 0%, rgba(214,196,155,.20), transparent 60%),
+      radial-gradient(1000px 700px at 90% 90%, rgba(151,166,178,.18), transparent 55%),
+      var(--paper);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* 纸面颗粒 */
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    opacity: .35;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.05'/%3E%3C/svg%3E");
+    z-index: 0;
+  }
+
+  ::selection { background: rgba(140,59,54,.18); }
+
+  button { font-family: inherit; cursor: pointer; }
+  button:focus-visible, input:focus-visible, textarea:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+
+  /* ============ 屏幕切换 ============ */
+  .screen {
+    position: relative;
+    z-index: 1;
+    min-height: 100vh;
+    animation: screen-in .7s ease;
+  }
+  .screen.is-hidden { display: none !important; }
+  @keyframes screen-in {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  .back-link {
+    position: absolute;
+    top: 1.6rem; left: 1.6rem;
+    z-index: 5;
+    background: none;
+    border: none;
+    font-size: .82rem;
+    letter-spacing: .2em;
+    color: var(--ink-soft);
+    padding: .5rem .2rem;
+    border-bottom: 1px solid transparent;
+    transition: color .3s, border-color .3s;
+  }
+  .back-link:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* ============ 屏一 · 首页 ============ */
+  #screen-home {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 3.5rem 1.5rem 5rem;
+  }
+
+  .landing-eyebrow {
+    font-family: var(--serif-en);
+    font-style: italic;
+    letter-spacing: .35em;
+    font-size: .85rem;
+    color: var(--ink-faint);
+    text-transform: lowercase;
+    margin-bottom: 2.2rem;
+  }
+
+  .landing-title {
+    font-family: var(--serif-en);
+    font-weight: 500;
+    font-size: clamp(3rem, 9vw, 6.5rem);
+    line-height: 1.02;
+    letter-spacing: .01em;
+    color: var(--ink);
+  }
+  .landing-title em { font-style: italic; color: var(--accent); }
+
+  .landing-cn {
+    margin-top: 1.4rem;
+    font-size: clamp(1rem, 2.4vw, 1.3rem);
+    font-weight: 300;
+    letter-spacing: .5em;
+    text-indent: .5em;
+    color: var(--ink-soft);
+  }
+
+  .landing-words {
+    margin-top: 2.4rem;
+    display: flex;
+    gap: 1.1rem;
+    flex-wrap: wrap;
+    justify-content: center;
+    font-family: var(--serif-en);
+    font-style: italic;
+    font-size: 1.05rem;
+    color: var(--ink-faint);
+  }
+  .landing-words span { position: relative; }
+  .landing-words span + span::before {
+    content: "·";
+    position: absolute;
+    left: -.78rem;
+  }
+
+  /* 设备连接状态块 */
+  .device-chip {
+    margin-top: 2.8rem;
+    display: inline-flex;
+    align-items: center;
+    gap: .65rem;
+    background: rgba(255,255,255,.35);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: .6rem 1.3rem;
+    font-size: .8rem;
+    letter-spacing: .12em;
+    color: var(--ink-soft);
+    transition: border-color .3s, background .3s;
+  }
+  .device-chip .dot {
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: var(--straw);
+    transition: background .3s, box-shadow .3s;
+  }
+  .device-chip.connected { border-color: rgba(124,143,110,.5); }
+  .device-chip.connected .dot {
+    background: var(--ok);
+    box-shadow: 0 0 0 4px rgba(124,143,110,.18);
+    animation: pulse 2.2s ease infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 3px rgba(124,143,110,.20); }
+    50%      { box-shadow: 0 0 0 6px rgba(124,143,110,.08); }
+  }
+  .device-chip .chip-action {
+    border: none;
+    background: none;
+    font-size: .75rem;
+    letter-spacing: .15em;
+    color: var(--accent);
+    border-bottom: 1px dashed var(--accent);
+    padding: 0 0 1px;
+    margin-left: .4rem;
+  }
+
+  .home-actions {
+    margin-top: 2.6rem;
+    display: flex;
+    gap: 1.2rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .btn-start {
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    color: var(--paper);
+    font-size: 1rem;
+    letter-spacing: .6em;
+    text-indent: .6em;
+    padding: 1.05rem 3.2rem;
+    border-radius: 999px;
+    transition: background .45s ease, transform .45s ease, box-shadow .45s ease;
+    box-shadow: 0 16px 30px -18px rgba(140,59,54,.6);
+  }
+  .btn-start:hover { background: var(--accent-deep); transform: translateY(-2px); }
+
+  /* 社群入口卡 */
+  .community-entry {
+    margin-top: 3.6rem;
+    width: min(560px, 100%);
+    text-align: left;
+    background: rgba(255,255,255,.35);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 1.6rem 1.8rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.2rem;
+    transition: transform .35s ease, box-shadow .35s ease, border-color .35s ease;
+  }
+  .community-entry:hover {
+    transform: translateY(-3px);
+    border-color: rgba(140,59,54,.35);
+    box-shadow: 0 20px 36px -24px rgba(51,48,42,.4);
+  }
+  .community-entry .ce-title {
+    font-size: 1.05rem;
+    font-weight: 500;
+    letter-spacing: .15em;
+  }
+  .community-entry .ce-sub {
+    margin-top: .45rem;
+    font-size: .8rem;
+    font-weight: 300;
+    color: var(--ink-soft);
+    letter-spacing: .1em;
+    line-height: 1.8;
+  }
+  .community-entry .ce-arrow {
+    font-family: var(--serif-en);
+    font-size: 1.6rem;
+    color: var(--accent);
+    flex-shrink: 0;
+    transition: transform .3s ease;
+  }
+  .community-entry:hover .ce-arrow { transform: translateX(5px); }
+
+  .landing-foot {
+    position: absolute;
+    bottom: 1.8rem;
+    left: 0; right: 0;
+    font-size: .75rem;
+    letter-spacing: .25em;
+    color: var(--ink-faint);
+  }
+
+  /* ============ 屏二 · 拼贴台 ============ */
+  .studio {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 4.5rem 1.5rem 5rem;
+  }
+  .studio-head { text-align: center; margin-bottom: 3rem; }
+  .studio-head h1 {
+    font-family: var(--serif-en);
+    font-weight: 500;
+    font-size: clamp(1.9rem, 4vw, 2.6rem);
+  }
+  .studio-head p {
+    margin-top: .7rem;
+    font-size: .9rem;
+    font-weight: 300;
+    letter-spacing: .3em;
+    color: var(--ink-soft);
+  }
+  .studio-head .device-chip { margin-top: 1.2rem; }
+
+  .board, .muse {
+    background: rgba(255,255,255,.32);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 2rem 1.8rem 1.6rem;
+    box-shadow: 0 18px 40px -28px rgba(51,48,42,.35);
+  }
+  .board-label {
+    font-family: var(--serif-en);
+    font-style: italic;
+    font-size: .85rem;
+    letter-spacing: .2em;
+    color: var(--ink-faint);
+    margin-bottom: 1.2rem;
+  }
+  .sentence-line {
+    min-height: 4.8rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: .6rem;
+    padding-bottom: .9rem;
+    border-bottom: 1px dashed var(--line);
+  }
+  .sentence-line:empty::before {
+    content: "轻点下方词块，或在实体词块上摆放——句子将在这里生长";
+    font-size: .9rem;
+    font-weight: 300;
+    color: var(--ink-faint);
+    align-self: center;
+  }
+  .board-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: flex-end;
+    margin-top: 1rem;
+  }
+  .btn-ghost {
+    background: none;
+    border: none;
+    font-size: .82rem;
+    letter-spacing: .25em;
+    color: var(--ink-soft);
+    padding: .4rem .2rem;
+    border-bottom: 1px solid transparent;
+    transition: color .3s, border-color .3s;
+  }
+  .btn-ghost:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* 词块 · 简单圆角矩形 */
+  .tile {
+    --tile-bg: var(--sage);
+    font-family: var(--serif-en);
+    font-size: 1.1rem;
+    font-weight: 500;
+    color: var(--tile-ink);
+    background: var(--tile-bg);
+    border: 1px solid rgba(255,255,255,.45);
+    border-radius: 10px;
+    padding: .55rem 1.1rem;
+    box-shadow: 0 2px 6px -2px rgba(51,48,42,.35);
+    transition: transform .2s ease, box-shadow .2s ease;
+    user-select: none;
+  }
+  .tile:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 12px -6px rgba(51,48,42,.45);
+  }
+  .tile:active { transform: scale(.97); }
+  .tile[data-c="0"] { --tile-bg: var(--sage); }
+  .tile[data-c="1"] { --tile-bg: var(--blue); }
+  .tile[data-c="2"] { --tile-bg: var(--coral); }
+  .tile[data-c="3"] { --tile-bg: var(--straw); }
+
+  .tile-edit {
+    font-family: var(--serif-en);
+    font-size: 1.1rem;
+    color: var(--ink);
+    background: rgba(255,255,255,.8);
+    border: 1px solid var(--accent);
+    border-radius: 10px;
+    padding: .5rem .85rem;
+    width: 6.5em;
+    max-width: 44vw;
+  }
+
+  .tile.in-line { animation: drop .35s cubic-bezier(.34,1.56,.64,1); }
+  @keyframes drop {
+    from { transform: translateY(-10px); opacity: 0; }
+    to   { transform: translateY(0); opacity: 1; }
+  }
+
+  .board-tip {
+    margin-top: .7rem;
+    font-size: .75rem;
+    letter-spacing: .08em;
+    color: var(--ink-faint);
+  }
+
+  .bank { margin-top: 2.6rem; }
+  .bank-label {
+    font-size: .8rem;
+    letter-spacing: .35em;
+    color: var(--ink-faint);
+    margin-bottom: 1.1rem;
+    text-align: center;
+  }
+  .bank-tiles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .85rem;
+    justify-content: center;
+  }
+  .bank-tiles .tile.used { opacity: .26; pointer-events: none; transform: scale(.92); }
+
+  .manual {
+    margin-top: 2rem;
+    display: flex;
+    gap: .8rem;
+    justify-content: center;
+  }
+  .manual input {
+    font-family: var(--serif-en);
+    font-size: 1.05rem;
+    color: var(--ink);
+    background: rgba(255,255,255,.45);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: .65rem 1.4rem;
+    width: min(320px, 60vw);
+  }
+  .manual input::placeholder { color: var(--ink-faint); font-style: italic; }
+  .btn-add {
+    background: var(--ink);
+    color: var(--paper);
+    border: 1px solid var(--ink);
+    border-radius: 999px;
+    padding: .65rem 1.6rem;
+    font-size: .85rem;
+    letter-spacing: .3em;
+    text-indent: .3em;
+    transition: background .3s, transform .3s;
+  }
+  .btn-add:hover { background: var(--accent); border-color: var(--accent); transform: translateY(-1px); }
+
+  /* ============ 评价窗 ============ */
+  .muse { margin-top: 3.6rem; padding: 2.2rem 1.8rem; }
+  .muse-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-bottom: 1.6rem;
+  }
+  .muse-head h2 {
+    font-family: var(--serif-en);
+    font-weight: 500;
+    font-size: 1.5rem;
+  }
+  .muse-head h2 span {
+    font-family: var(--serif-cn);
+    font-size: .95rem;
+    font-weight: 300;
+    letter-spacing: .3em;
+    color: var(--ink-soft);
+    margin-left: .6rem;
+  }
+  .muse-actions { display: flex; gap: .8rem; flex-wrap: wrap; }
+  .btn-muse {
+    border: 1px solid var(--ink);
+    background: transparent;
+    color: var(--ink);
+    border-radius: 999px;
+    padding: .6rem 1.5rem;
+    font-size: .85rem;
+    letter-spacing: .25em;
+    text-indent: .25em;
+    transition: background .35s, color .35s, border-color .35s;
+  }
+  .btn-muse:hover { background: var(--ink); color: var(--paper); }
+  .btn-muse.primary { background: var(--accent); border-color: var(--accent); color: var(--paper); }
+  .btn-muse.primary:hover { background: var(--accent-deep); border-color: var(--accent-deep); }
+
+  .muse-out {
+    min-height: 7rem;
+    border-top: 1px dashed var(--line);
+    padding-top: 1.4rem;
+    font-weight: 300;
+    font-size: 1rem;
+    line-height: 2;
+  }
+  .muse-out .placeholder { color: var(--ink-faint); font-size: .9rem; letter-spacing: .1em; }
+  .muse-out .thinking { color: var(--ink-faint); font-style: italic; font-family: var(--serif-en); letter-spacing: .1em; }
+  .muse-out .thinking::after { content: ""; animation: dots 1.4s steps(4) infinite; }
+  @keyframes dots { 0%{content:""} 25%{content:"."} 50%{content:".."} 75%{content:"..."} }
+  .muse-out .poem-line { display: block; font-family: var(--serif-en); font-style: italic; color: var(--accent); margin: .4rem 0 .8rem; }
+  .caret { display: inline-block; width: 1px; height: 1em; background: var(--accent); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .share-strip {
+    margin-top: 1.6rem;
+    padding-top: 1.2rem;
+    border-top: 1px dashed var(--line);
+    display: none;
+    justify-content: flex-end;
+  }
+  .share-strip.show { display: flex; }
+
+  .studio-foot {
+    margin-top: 3.5rem;
+    text-align: center;
+    font-size: .75rem;
+    letter-spacing: .25em;
+    color: var(--ink-faint);
+    line-height: 2.2;
+  }
+
+  /* ============ 屏三 · 社群 ============ */
+  .community {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 4.5rem 1.5rem 5rem;
+  }
+  .community-head { text-align: center; margin-bottom: 2.8rem; }
+  .community-head h1 {
+    font-family: var(--serif-en);
+    font-weight: 500;
+    font-size: clamp(1.9rem, 4vw, 2.6rem);
+  }
+  .community-head p {
+    margin-top: .7rem;
+    font-size: .9rem;
+    font-weight: 300;
+    letter-spacing: .3em;
+    color: var(--ink-soft);
+  }
+  .btn-publish {
+    margin-top: 1.6rem;
+    background: var(--ink);
+    color: var(--paper);
+    border: 1px solid var(--ink);
+    border-radius: 999px;
+    padding: .75rem 2.2rem;
+    font-size: .88rem;
+    letter-spacing: .35em;
+    text-indent: .35em;
+    transition: background .3s, transform .3s;
+  }
+  .btn-publish:hover { background: var(--accent); border-color: var(--accent); transform: translateY(-2px); }
+
+  .feed { display: flex; flex-direction: column; gap: 1.4rem; }
+  .post {
+    background: rgba(255,255,255,.35);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 1.7rem 1.8rem 1.3rem;
+    box-shadow: 0 14px 30px -24px rgba(51,48,42,.4);
+    animation: screen-in .5s ease;
+  }
+  .post-meta {
+    display: flex;
+    align-items: center;
+    gap: .7rem;
+    margin-bottom: 1rem;
+  }
+  .post-tag {
+    font-size: .7rem;
+    letter-spacing: .2em;
+    border-radius: 999px;
+    padding: .25rem .8rem;
+    color: var(--paper);
+  }
+  .post-tag.poem  { background: var(--blue); }
+  .post-tag.story { background: var(--coral); }
+  .post-author { font-size: .82rem; color: var(--ink-soft); letter-spacing: .1em; }
+  .post-time   { font-size: .75rem; color: var(--ink-faint); margin-left: auto; }
+
+  .post-body { font-weight: 300; line-height: 2; font-size: .98rem; }
+  .post-body .verse {
+    display: block;
+    font-family: var(--serif-en);
+    font-style: italic;
+    font-size: 1.1rem;
+    color: var(--ink);
+    line-height: 1.9;
+  }
+  .post-ref {
+    margin-top: .8rem;
+    font-size: .78rem;
+    color: var(--ink-faint);
+    letter-spacing: .05em;
+  }
+  .post-ref em { font-family: var(--serif-en); color: var(--accent); }
+
+  .post-actions {
+    margin-top: 1.2rem;
+    padding-top: 1rem;
+    border-top: 1px dashed var(--line);
+    display: flex;
+    gap: 1.6rem;
+  }
+  .btn-like, .btn-continue {
+    background: none;
+    border: none;
+    font-size: .82rem;
+    letter-spacing: .15em;
+    color: var(--ink-soft);
+    display: inline-flex;
+    align-items: center;
+    gap: .45rem;
+    padding: .3rem .2rem;
+    transition: color .3s, transform .2s;
+  }
+  .btn-like:hover, .btn-continue:hover { color: var(--accent); }
+  .btn-like.liked { color: var(--accent); }
+  .btn-like .heart { font-size: 1rem; transition: transform .25s cubic-bezier(.34,1.56,.64,1); }
+  .btn-like.liked .heart { transform: scale(1.25); }
+  .btn-like:active .heart { transform: scale(1.4); }
+
+  /* ============ 屏四 · 发布 ============ */
+  .publish {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 4.5rem 1.5rem 5rem;
+  }
+  .publish h1 {
+    font-family: var(--serif-en);
+    font-weight: 500;
+    font-size: clamp(1.7rem, 4vw, 2.3rem);
+    text-align: center;
+  }
+  .publish .pub-sub {
+    text-align: center;
+    margin-top: .7rem;
+    font-size: .88rem;
+    font-weight: 300;
+    letter-spacing: .3em;
+    color: var(--ink-soft);
+  }
+  .pub-card {
+    margin-top: 2.6rem;
+    background: rgba(255,255,255,.35);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 2rem 1.8rem;
+    box-shadow: 0 18px 40px -28px rgba(51,48,42,.35);
+  }
+  .pub-ref {
+    display: none;
+    margin-bottom: 1.4rem;
+    padding: .9rem 1.1rem;
+    border-left: 3px solid var(--coral);
+    background: rgba(200,155,140,.12);
+    border-radius: 0 12px 12px 0;
+    font-size: .82rem;
+    color: var(--ink-soft);
+    line-height: 1.9;
+  }
+  .pub-ref.show { display: block; }
+  .pub-ref em { font-family: var(--serif-en); color: var(--accent); }
+
+  .pub-types { display: flex; gap: .8rem; margin-bottom: 1.4rem; }
+  .pub-type {
+    flex: 1;
+    border: 1px solid var(--line);
+    background: transparent;
+    border-radius: 999px;
+    padding: .65rem 0;
+    font-size: .88rem;
+    letter-spacing: .25em;
+    text-indent: .25em;
+    color: var(--ink-soft);
+    transition: all .3s;
+  }
+  .pub-type.active {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: var(--paper);
+  }
+
+  .pub-field { margin-bottom: 1.3rem; }
+  .pub-field label {
+    display: block;
+    font-size: .78rem;
+    letter-spacing: .3em;
+    color: var(--ink-faint);
+    margin-bottom: .6rem;
+  }
+  .pub-field input, .pub-field textarea {
+    width: 100%;
+    font-family: var(--serif-cn);
+    font-size: 1rem;
+    font-weight: 300;
+    color: var(--ink);
+    background: rgba(255,255,255,.5);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: .8rem 1.1rem;
+    resize: vertical;
+    line-height: 1.9;
+  }
+  .pub-field textarea { min-height: 9rem; }
+  .pub-field input::placeholder, .pub-field textarea::placeholder { color: var(--ink-faint); }
+
+  .pub-actions { display: flex; gap: 1rem; justify-content: flex-end; margin-top: 1.6rem; }
+  .btn-cancel {
+    background: none;
+    border: none;
+    font-size: .85rem;
+    letter-spacing: .25em;
+    color: var(--ink-soft);
+    padding: .6rem .4rem;
+    border-bottom: 1px solid transparent;
+    transition: color .3s, border-color .3s;
+  }
+  .btn-cancel:hover { color: var(--accent); border-color: var(--accent); }
+  .btn-submit {
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    color: var(--paper);
+    border-radius: 999px;
+    padding: .7rem 2.4rem;
+    font-size: .9rem;
+    letter-spacing: .35em;
+    text-indent: .35em;
+    transition: background .3s, transform .3s;
+  }
+  .btn-submit:hover { background: var(--accent-deep); transform: translateY(-1px); }
+
+  /* ============ 跨页跳转 · 缪斯页 · 语言学习 ============ */
+  .page-next {
+    margin-top: 2.6rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem 1.4rem;
+    flex-wrap: wrap;
+  }
+  .next-hint {
+    flex: 1;
+    min-width: 12rem;
+    font-size: .8rem;
+    letter-spacing: .08em;
+    color: var(--ink-faint);
+    line-height: 1.9;
+  }
+  .btn-next {
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    color: var(--paper);
+    border-radius: 999px;
+    padding: .95rem 2.6rem;
+    font-size: .95rem;
+    letter-spacing: .35em;
+    text-indent: .35em;
+    box-shadow: 0 16px 30px -18px rgba(140,59,54,.6);
+    transition: background .35s, transform .35s;
+  }
+  .btn-next:hover { background: var(--accent-deep); transform: translateY(-2px); }
+
+  .muse-page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 4.5rem 1.5rem 5rem;
+  }
+  .muse-page .studio-head { margin-bottom: 2.2rem; }
+  .muse-page .muse { margin-top: 0; }
+  .sentence-display {
+    min-height: 3.4rem;
+    display: flex;
+    align-items: center;
+    font-family: var(--serif-en);
+    font-style: italic;
+    font-size: 1.3rem;
+    line-height: 1.9;
+    letter-spacing: .03em;
+    padding-bottom: 1rem;
+    border-bottom: 1px dashed var(--line);
+    overflow-wrap: anywhere;
+  }
+  .sentence-display .placeholder {
+    font-family: var(--serif-cn);
+    font-style: normal;
+    font-size: .9rem;
+    letter-spacing: .1em;
+    color: var(--ink-faint);
+  }
+  .muse-page .muse-actions { justify-content: center; margin-top: 1.4rem; }
+
+  .learn { display: flex; flex-direction: column; gap: 1.3rem; }
+  .learn-head {
+    font-family: var(--serif-en);
+    font-style: italic;
+    font-size: 1.08rem;
+    color: var(--accent);
+  }
+  .learn-block h3 {
+    font-family: var(--serif-en);
+    font-weight: 500;
+    font-size: 1.05rem;
+    margin-bottom: .7rem;
+  }
+  .learn-block h3 span {
+    font-family: var(--serif-cn);
+    font-size: .72rem;
+    font-weight: 300;
+    letter-spacing: .2em;
+    color: var(--ink-faint);
+    margin-left: .5rem;
+  }
+  .learn-item {
+    padding: .15rem 0 .85rem .9rem;
+    margin-bottom: .6rem;
+    border-left: 2px solid rgba(214,196,155,.7);
+  }
+  .learn-issue { font-size: .95rem; font-weight: 500; }
+  .learn-fix { font-size: .9rem; color: var(--accent); margin-top: .25rem; }
+  .learn-why, .learn-example {
+    font-size: .88rem;
+    font-weight: 300;
+    color: var(--ink-soft);
+    line-height: 1.9;
+    margin-top: .25rem;
+  }
+  .learn-example { font-family: var(--serif-en); font-size: .98rem; }
+  .muse-raw {
+    white-space: pre-wrap;
+    font-size: .88rem;
+    font-weight: 300;
+    line-height: 1.9;
+    color: var(--ink-soft);
+  }
+  .muse-error { color: var(--accent); font-size: .95rem; line-height: 1.9; }
+  .muse-error-hint { margin-top: .6rem; font-size: .82rem; color: var(--ink-faint); line-height: 1.9; }
+
+  @media (max-width: 560px) {
+    .manual { flex-direction: column; align-items: center; }
+    .btn-add { width: min(320px, 60vw); }
+    .muse-head { justify-content: center; text-align: center; }
+    .community-entry { flex-direction: column; text-align: center; }
+    .back-link { top: 1rem; left: 1rem; }
+    .page-next { flex-direction: column; align-items: stretch; text-align: center; }
+    .btn-next { width: 100%; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    html { scroll-behavior: auto; }
+  }
+
+  /* Independent, soft bubble controls for the two hardware transfers. */
+  .transfer-panel { margin: 0 0 28px; padding: 8px 0 4px; text-align: center; }
+  .transfer-label { color: var(--ink-soft); font-size: 11px; letter-spacing: .16em; margin-bottom: 16px; }
+  .transfer-actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 18px; }
+  .transfer-bubble {
+    position: relative; border: 1px solid rgba(255,255,255,.55); padding: 20px 28px;
+    min-width: 205px; min-height: 96px; border-radius: 54% 46% 48% 52% / 50% 53% 47% 50%;
+    background: linear-gradient(145deg, #e2e7da, #b9c4af); color: var(--ink);
+    box-shadow: inset 0 2px 9px rgba(255,255,255,.42), 0 8px 18px rgba(68,75,56,.08);
+    transition: transform .2s, box-shadow .2s;
+  }
+  .hardware-word-hint { display: flex; flex-direction: column; justify-content: center; }
+  .transfer-bubble.sentence-bubble {
+    background: linear-gradient(145deg, #e0e6eb, #b5c2cc);
+    border-radius: 47% 53% 52% 48% / 53% 48% 52% 47%;
+  }
+  .transfer-bubble strong { display: block; font-size: 16px; font-weight: 500; letter-spacing: .08em; }
+  .transfer-bubble small { display: block; margin-top: 7px; font-size: 10px; color: var(--ink-soft); letter-spacing: .04em; }
+  button.transfer-bubble:hover:not(:disabled) { transform: translateY(-3px); box-shadow: inset 0 2px 9px #ffffff66, 0 12px 24px #444b381c; }
+  .transfer-bubble:disabled { opacity: .58; cursor: wait; }
+  .transfer-status { min-height: 2.8em; margin: 14px auto 0; max-width: 560px; font-size: 11px; color: var(--ink-soft); line-height: 1.8; }
+  .bank-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 15px; }
+  .bank-head .bank-label { margin: 0; }
+  .refresh-bank { border: 1px solid var(--line); border-radius: 999px; padding: 8px 15px; background: #ffffff40; font-size: 11px; color: var(--ink-soft); white-space: nowrap; }
+  .refresh-bank:hover { background: #ffffff80; color: var(--accent); }
+  @media (max-width: 480px) {
+    .transfer-actions { gap: 10px; }
+    .transfer-bubble { min-width: 0; flex: 1 1 135px; max-width: 240px; min-height: 92px; padding: 18px 12px; }
+    .transfer-bubble strong { font-size: 14px; }
+    .transfer-bubble small { font-size: 9px; }
+    .manual { flex-wrap: wrap; }
+    .manual input { width: 100%; min-width: 0; }
+    .manual .btn-add { font-size: 12px; letter-spacing: .08em; }
+  }
+
+</style>
+</head>
+<body>
+
+<!-- ================= 屏一 · 首页 ================= -->
+<section class="screen" id="screen-home">
+  <p class="landing-eyebrow">a tactile poetry workshop</p>
+  <h1 class="landing-title">Words <em>in</em> Hand</h1>
+  <p class="landing-cn">把 语 言 拼 出 来</p>
+  <div class="landing-words">
+    <span>pick</span><span>place</span><span>listen</span>
+  </div>
+
+  <!-- 词块连接状态块 -->
+  <div class="device-chip" id="home-chip">
+    <span class="dot"></span>
+    <span class="chip-text">词块未连接</span>
+    <button class="chip-action" id="chip-toggle">连接设备</button>
+  </div>
+
+  <div class="home-actions">
+    <button class="btn-start" id="btn-start">开始</button>
+  </div>
+
+  <!-- 社群入口 -->
+  <button class="community-entry" id="btn-community">
+    <span>
+      <span class="ce-title">社群 · 诗集墙</span>
+      <span class="ce-sub" style="display:block">发布你的拼贴诗，续写别人的故事，为心动的句子点一盏灯</span>
+    </span>
+    <span class="ce-arrow">→</span>
+  </button>
+
+  <p class="landing-foot">WORDS IN HAND · 实体语言拼贴工作坊</p>
+</section>
+
+<!-- ================= 屏二 · 拼贴台 ================= -->
+<main class="studio screen is-hidden" id="screen-studio">
+  <button class="back-link" data-go="home">← 返回首页</button>
+  <header class="studio-head">
+    <h1>The Composing Table</h1>
+    <p>拼 贴 台 · 拾 词 成 句</p>
+    <div class="device-chip" id="studio-chip">
+      <span class="dot"></span>
+      <span class="chip-text">词块未连接</span>
+    </div>
+  </header>
+
+  <section class="transfer-panel" aria-label="硬件词语传输">
+    <p class="transfer-label">从手中，来到纸上 · FROM YOUR BLOCK</p>
+    <div class="transfer-actions">
+      <div class="transfer-bubble hardware-word-hint" id="hardware-word-hint" role="note">
+        <strong>按模块 A 放上词块</strong><small id="hardware-word-status">选词页短按 A 确认，自动传入网页</small>
+      </div>
+      <button type="button" class="transfer-bubble sentence-bubble" id="btn-import-sentence">
+        <strong>放上整个句子</strong><small>读取词块保存的完整句子</small>
+      </button>
+    </div>
+    <p class="transfer-status" id="sentence-import-status" role="status">连接后，在模块选词页短按 A 确认即可放上单词；整句可点击右侧按钮导入。</p>
+  </section>
+
+  <section class="board" aria-label="句子板">
+    <p class="board-label">your sentence · 你的句子</p>
+    <div class="sentence-line" id="sentence-line" aria-live="polite"></div>
+    <div class="board-actions">
+      <button class="btn-ghost" id="btn-undo">撤回一词</button>
+      <button class="btn-ghost" id="btn-clear">清空重来</button>
+    </div>
+    <p class="board-tip">点击句子中的词块可修改词形（如 count → counts / counted），清空后保存即删除。</p>
+  </section>
+
+  <section class="bank" aria-label="词库">
+    <div class="bank-head">
+      <p class="bank-label">词 库 · WORD BANK</p>
+      <button type="button" class="refresh-bank" id="btn-refresh-bank">↻ 换一组词块</button>
+    </div>
+    <div class="bank-tiles" id="bank-tiles"></div>
+  </section>
+
+  <form class="manual" id="manual-form">
+    <input type="text" id="manual-input" placeholder="也可以在此手动输入单词…" autocomplete="off" maxlength="24">
+    <button type="submit" class="btn-add">添加输入的词</button>
+  </form>
+
+  <div class="page-next">
+    <p class="next-hint" id="next-hint">拼好后进入下一页，让缪斯读一读、酿一段故事，或讲讲语法。</p>
+    <button class="btn-next" id="btn-finish">完成拼贴 →</button>
+  </div>
+
+  <footer class="studio-foot">
+    WORDS IN HAND · 实体语言拼贴工作坊<br>
+    实体词块可通过 USB 串口连接 · 评价、故事与语言学习由大模型生成
+  </footer>
+</main>
+
+<!-- ================= 屏二·续 · 缪斯间 ================= -->
+<main class="muse-page screen is-hidden" id="screen-muse">
+  <button class="back-link" data-go="studio">← 返回拼贴台</button>
+  <header class="studio-head">
+    <h1>The Muse</h1>
+    <p>缪 斯 间 · 读 句 · 酿 故 事 · 学 语 言</p>
+  </header>
+
+  <section class="muse" aria-label="缪斯评价窗">
+    <p class="board-label">your sentence · 你的句子</p>
+    <div class="sentence-display" id="muse-sentence"></div>
+    <div class="muse-actions">
+      <button class="btn-muse" id="btn-critique">评价这句话</button>
+      <button class="btn-muse primary" id="btn-story">生成小故事</button>
+      <button class="btn-muse" id="btn-learn">语言学习</button>
+    </div>
+    <div class="muse-out" id="muse-out" aria-live="polite">
+      <span class="placeholder">当前句子已放在这里。让缪斯读一读、酿一段故事，或检查语法并讲讲英语知识点。结果会显示在下方。</span>
+    </div>
+    <div class="share-strip" id="share-strip">
+      <button class="btn-muse" id="btn-share">分享到诗集墙 →</button>
+    </div>
+  </section>
+</main>
+
+<!-- ================= 屏三 · 社群诗集墙 ================= -->
+<section class="community screen is-hidden" id="screen-community">
+  <button class="back-link" data-go="home">← 返回首页</button>
+  <header class="community-head">
+    <h1>The Poetry Wall</h1>
+    <p>诗 集 墙 · 句 子 与 故 事 的 集 市</p>
+    <button class="btn-publish" id="btn-new-post">＋ 发布我的作品</button>
+  </header>
+  <div class="feed" id="feed"></div>
+</section>
+
+<!-- ================= 屏四 · 发布 ================= -->
+<section class="publish screen is-hidden" id="screen-publish">
+  <button class="back-link" data-go="community">← 返回诗集墙</button>
+  <h1>Publish a Piece</h1>
+  <p class="pub-sub">发 布 · 把 句 子 留 在 墙 上</p>
+  <div class="pub-card">
+    <div class="pub-ref" id="pub-ref"></div>
+    <div class="pub-types" role="group" aria-label="作品类型">
+      <button class="pub-type active" data-type="poem">拼贴诗</button>
+      <button class="pub-type" data-type="story">故事续写</button>
+    </div>
+    <div class="pub-field">
+      <label for="pub-name">署名</label>
+      <input type="text" id="pub-name" placeholder="匿名诗人" maxlength="12">
+    </div>
+    <div class="pub-field">
+      <label for="pub-content" id="pub-content-label">你的拼贴诗</label>
+      <textarea id="pub-content" placeholder="he counts stars&#10;she paints with light&#10;soon&#10;we lit the dark"></textarea>
+    </div>
+    <div class="pub-actions">
+      <button class="btn-cancel" id="btn-cancel-pub">取消</button>
+      <button class="btn-submit" id="btn-submit-pub">发布上墙</button>
+    </div>
+  </div>
+</section>
+
+<script>
+/* ============================================================
+ * Words in Hand · App 式翻页流程
+ * #/home → #/studio（拼贴台）→ #/muse（评价/故事/语言学习）
+ *        → #/community（诗集墙）→ #/publish（发帖）
+ * 数据流：
+ *   ESP32-S3 固件 →（Web Serial）→ placeWord(word)
+ *   句子 →（server.py 代理大模型 API）→ 评价 / 故事 / 语言学习
+ *   帖子 → localStorage（社群墙本地存储）
+ * ============================================================ */
+
+// ---------- 页面路由 ----------
+const PAGES = {
+  home: 'screen-home',
+  studio: 'screen-studio',
+  muse: 'screen-muse',
+  community: 'screen-community',
+  publish: 'screen-publish'
+};
+let currentPage = 'home';
+
+function pageFromHash() {
+  const m = location.hash.match(/^#\/([a-z]+)/);
+  return (m && PAGES[m[1]]) ? m[1] : 'home';
+}
+
+function go(page) {
+  if (location.hash === '#/' + page) renderPage(page);
+  else location.hash = '#/' + page;
+}
+
+function renderPage(page) {
+  currentPage = page;
+  document.querySelectorAll('.screen').forEach(s => s.classList.add('is-hidden'));
+  document.getElementById(PAGES[page]).classList.remove('is-hidden');
+  window.scrollTo(0, 0);
+  if (page === 'muse') renderMuseSentence();
+  if (page === 'community') renderFeed();
+}
+
+window.addEventListener('hashchange', () => renderPage(pageFromHash()));
+document.querySelectorAll('.back-link').forEach(b =>
+  b.addEventListener('click', () => go(b.dataset.go)));
+
+// ---------- 设备连接状态 ----------
+let deviceConnected = false;
+function renderDevice() {
+  document.querySelectorAll('.device-chip').forEach(chip => {
+    chip.classList.toggle('connected', deviceConnected);
+    chip.querySelector('.chip-text').textContent =
+      deviceConnected ? '词块已连接 · ESP32-S3' : (window.wihStatusText || '词块未连接');
+  });
+  document.getElementById('chip-toggle').textContent =
+    deviceConnected ? '断开' : '连接设备';
+}
+
+document.getElementById('btn-start').addEventListener('click', () => go('studio'));
+document.getElementById('btn-community').addEventListener('click', () => go('community'));
+document.getElementById('btn-finish').addEventListener('click', () => {
+  if (!sentence.length) {
+    document.getElementById('next-hint').textContent = '先放上一个词块，再去缪斯那里吧。';
+    return;
+  }
+  document.getElementById('next-hint').textContent = '拼好后进入下一页，让缪斯读一读、酿一段故事，或讲讲语法。';
+  go('muse');
+});
+
+// ---------- 词库与拼贴 ----------
+const WORD_POOL = ["he", "she", "we", "they", "you", "i", "it", "the", "a", "an", "this", "that", "these", "those", "my", "your", "our", "their", "is", "are", "was", "were", "be", "been", "will", "would", "can", "could", "should", "may", "might", "must", "do", "does", "did", "have", "has", "had", "and", "or", "but", "so", "if", "while", "when", "where", "why", "how", "with", "without", "within", "into", "through", "across", "above", "below", "beside", "between", "beneath", "beyond", "near", "far", "from", "to", "of", "for", "in", "on", "at", "by", "as", "not", "never", "always", "still", "again", "here", "there", "now", "then", "soon", "once", "every", "each", "all", "some", "many", "little", "more", "less", "one", "two", "moon", "stars", "sun", "sky", "cloud", "rain", "snow", "wind", "sea", "river", "ocean", "lake", "forest", "tree", "leaf", "flower", "stone", "sand", "field", "garden", "mountain", "path", "road", "window", "door", "room", "house", "home", "paper", "book", "letter", "story", "poem", "word", "voice", "song", "light", "shadow", "silence", "dream", "memory", "time", "morning", "evening", "night", "dawn", "dusk", "winter", "spring", "summer", "autumn", "hand", "heart", "eye", "smile", "bird", "wing", "seed", "root", "water", "fire", "earth", "air", "hold", "holds", "carry", "carries", "bring", "brings", "find", "finds", "make", "makes", "paint", "paints", "count", "counts", "sleep", "sleeps", "wake", "wakes", "sing", "sings", "whisper", "whispers", "bloom", "blooms", "drift", "drifts", "wander", "wanders", "flow", "flows", "fall", "falls", "rise", "rises", "shine", "shines", "glow", "glows", "dance", "dances", "wait", "waits", "listen", "listens", "remember", "remembers", "forget", "forgets", "open", "opens", "close", "closes", "touch", "touches", "meet", "meets", "love", "loves", "leave", "leaves", "return", "returns", "write", "writes", "read", "reads", "walk", "walks", "run", "runs", "stay", "stays", "grow", "grows", "soft", "softly", "slow", "slowly", "quiet", "quietly", "gentle", "gently", "bright", "dark", "warm", "cold", "blue", "green", "gold", "silver", "small", "deep", "wide", "empty", "full", "distant", "hidden", "wild", "tender", "fragile", "endless", "together", "apart", "away", "inside", "outside", "tonight", "tomorrow", "yesterday"];
+
+const bankEl  = document.getElementById('bank-tiles');
+const lineEl  = document.getElementById('sentence-line');
+const museOut = document.getElementById('muse-out');
+const sentence = [];   // { word, el, editor? }
+
+function refreshWordBank() {
+  const used = new Set(sentence.map(entry => entry.word));
+  let pool = WORD_POOL.filter(word => !used.has(word));
+  if (pool.length < 30) pool = [...WORD_POOL];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  let next = pool.slice(0, 30);
+  const previous = [...bankEl.children].map(tile => tile.textContent);
+  // Even a deterministic random source must not leave the same visible bank.
+  if (next.every((word, index) => word === previous[index])) {
+    next = pool.slice(1, 31);
+  }
+  bankEl.replaceChildren();
+  next.forEach((word, index) => {
+    const tile = document.createElement('button');
+    tile.type = 'button'; tile.className = 'tile'; tile.dataset.c = index % 4;
+    tile.textContent = word;
+    tile.setAttribute('aria-label', '放上词块 ' + word);
+    tile.classList.toggle('used', used.has(word));
+    tile.disabled = used.has(word);
+    tile.addEventListener('click', () => {
+      placeWord(word, index % 4);
+      tile.classList.add('used'); tile.disabled = true;
+    });
+    bankEl.appendChild(tile);
+  });
+}
+document.getElementById('btn-refresh-bank').addEventListener('click', refreshWordBank);
+refreshWordBank();
+
+function placeWord(word, colorIdx) {
+  const t = document.createElement('button');
+  t.type = 'button';
+  t.className = 'tile in-line';
+  t.dataset.c = colorIdx ?? Math.floor(Math.random() * 4);
+  t.textContent = word;
+  t.title = '点击修改词形';
+  const entry = { word, el: t };
+  t.addEventListener('click', () => editWord(entry));
+  sentence.push(entry);
+  lineEl.appendChild(t);
+  invalidateMuse();
+}
+
+// 点击句中词块 → 原地变成输入框，可改词形（三单、过去式等）；清空保存即删除。
+function editWord(entry) {
+  if (entry.editor) return;
+  const old = entry.word;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'tile-edit';
+  input.value = old;
+  input.maxLength = 24;
+  input.setAttribute('aria-label', '修改词块 ' + old);
+  entry.el.replaceWith(input);
+  entry.editor = input;
+  input.focus();
+  input.select();
+
+  let closed = false;
+  const finish = save => {
+    if (closed) return;
+    closed = true;
+    const next = input.value.trim().toLowerCase().replace(/[^a-z'\-]/g, '');
+    entry.editor = null;
+    input.replaceWith(entry.el);
+    if (save && !next) {
+      removeWord(sentence.indexOf(entry));
+      return;
+    }
+    if (save && next !== old) {
+      releaseBankTile(old);
+      entry.word = next;
+      entry.el.textContent = next;
+      entry.el.title = '点击修改词形';
+      markBankTile(next);
+      invalidateMuse();
+    }
+  };
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  });
+  input.addEventListener('blur', () => finish(true));
+}
+
+function removeWord(idx) {
+  if (idx < 0) return;
+  const [entry] = sentence.splice(idx, 1);
+  if (entry.editor) entry.editor.remove();
+  entry.el.remove();
+  releaseBankTile(entry.word);
+  invalidateMuse();
+}
+
+function releaseBankTile(word) {
+  for (const t of bankEl.children) {
+    if (t.textContent === word && t.classList.contains('used')) {
+      t.classList.remove('used');
+      t.disabled = false;
+      return;
+    }
+  }
+}
+
+function markBankTile(word) {
+  for (const t of bankEl.children) {
+    if (t.textContent === word && !t.classList.contains('used')) {
+      t.classList.add('used');
+      t.disabled = true;
+      return;
+    }
+  }
+}
+
+document.getElementById('btn-undo').addEventListener('click', () => {
+  if (sentence.length) removeWord(sentence.length - 1);
+});
+document.getElementById('btn-clear').addEventListener('click', () => {
+  while (sentence.length) removeWord(sentence.length - 1);
+});
+
+document.getElementById('manual-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const input = document.getElementById('manual-input');
+  const w = input.value.trim().toLowerCase().replace(/[^a-z'\-]/g, '');
+  if (!w) return;
+  placeWord(w);
+  input.value = '';
+  input.focus();
+});
+
+// ---------- 缪斯 · 大模型接口 ----------
+const sentenceText = () => sentence.map(s => s.word).join(' ');
+let lastStory = '';
+let museBusy = false;
+
+function renderMuseSentence() {
+  const el = document.getElementById('muse-sentence');
+  const strip = document.getElementById('share-strip');
+  if (!sentence.length) {
+    el.innerHTML = '<span class="placeholder">还没有句子 —— 先回拼贴台放几个词吧。</span>';
+    strip.classList.remove('show');
+    return;
+  }
+  el.innerHTML = '「 ' + escapeHtml(sentenceText()) + ' 」';
+  // 拼好句子就能分享；生成故事后按钮会改为分享故事。
+  document.getElementById('btn-share').textContent =
+    lastStory ? '分享这个故事 →' : '分享到诗集墙 →';
+  strip.classList.add('show');
+}
+
+function invalidateMuse() {
+  lastStory = '';
+  museOut.innerHTML = '<span class="placeholder">句子已更新 —— 再让缪斯读一读吧。</span>';
+  document.getElementById('share-strip').classList.remove('show');
+  if (currentPage === 'muse') renderMuseSentence();
+}
+
+async function evaluate(mode) {
+  if (!sentence.length) {
+    museOut.innerHTML = '<span class="placeholder">先拼一句吧 —— 哪怕只有一个词，缪斯也愿意读。</span>';
+    return;
+  }
+  if (museBusy) return;
+  museBusy = true;
+  lastStory = '';
+  document.getElementById('share-strip').classList.remove('show');
+  const label = {
+    critique: 'reading your line',
+    story: 'weaving a story',
+    learn: 'checking your grammar'
+  }[mode];
+  museOut.innerHTML = '<span class="thinking">' + label + '</span>';
+  try {
+    const data = await callMuse(mode);
+    if (mode === 'learn') {
+      renderLearn(data.content);
+    } else {
+      const text = String(data.content || '');
+      typewrite(text);
+      if (mode === 'story') lastStory = text;
+      document.getElementById('btn-share').textContent =
+        lastStory ? '分享这个故事 →' : '分享到诗集墙 →';
+    }
+    document.getElementById('share-strip').classList.add('show');
+  } catch (err) {
+    museOut.innerHTML =
+      '<div class="muse-error">缪斯暂时没有回应：' + escapeHtml(err.message) + '</div>' +
+      '<div class="muse-error-hint">请确认已在当前文件夹运行 <b>python server.py 8000</b>，并通过 http://localhost:8000 打开页面。</div>';
+  } finally {
+    museBusy = false;
+  }
+}
+
+async function callMuse(mode) {
+  const res = await fetch('/api/muse', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sentence: sentenceText(), mode })
+  });
+  let data = null;
+  try { data = await res.json(); } catch (e) { /* 非 JSON 响应 */ }
+  if (!res.ok || !data || !data.ok) {
+    throw new Error((data && data.error) || ('接口返回 ' + res.status));
+  }
+  return data;
+}
+
+function typewrite(text) {
+  museOut.innerHTML = '<span class="poem-line">「 ' + escapeHtml(sentenceText()) + ' 」</span><span id="tw"></span><span class="caret"></span>';
+  const target = document.getElementById('tw');
+  let i = 0;
+  (function step() {
+    if (i <= text.length) {
+      target.textContent = text.slice(0, i++);
+      setTimeout(step, 26);
+    } else {
+      const c = museOut.querySelector('.caret');
+      if (c) c.remove();
+    }
+  })();
+}
+
+function renderLearn(content) {
+  if (!content || typeof content !== 'object') {
+    typewrite(String(content || '暂时没有得到讲评。'));
+    return;
+  }
+  if (content.raw) {
+    museOut.innerHTML =
+      '<span class="poem-line">「 ' + escapeHtml(sentenceText()) + ' 」</span>' +
+      '<div class="muse-raw">' + escapeHtml(String(content.raw)) + '</div>';
+    return;
+  }
+  const issues = Array.isArray(content.grammarIssues) ? content.grammarIssues : [];
+  const points = Array.isArray(content.knowledgePoints) ? content.knowledgePoints : [];
+
+  let html = '<div class="learn">';
+  html += '<p class="learn-head">「 ' + escapeHtml(sentenceText()) + ' 」</p>';
+  html += '<div class="learn-block"><h3>语法判断 <span>grammar</span></h3>';
+  if (issues.length) {
+    issues.forEach(it => {
+      html += '<div class="learn-item">' +
+        '<p class="learn-issue">' + escapeHtml(String(it.issue || '')) + '</p>' +
+        (it.fix ? '<p class="learn-fix">改：' + escapeHtml(String(it.fix)) + '</p>' : '') +
+        (it.why ? '<p class="learn-why">' + escapeHtml(String(it.why)) + '</p>' : '') +
+        '</div>';
+    });
+  } else {
+    html += '<p class="learn-why">暂时没有发现需要调整的地方。</p>';
+  }
+  html += '</div>';
+  html += '<div class="learn-block"><h3>知识点启发 <span>takeaways</span></h3>';
+  if (points.length) {
+    points.forEach(pt => {
+      html += '<div class="learn-item">' +
+        '<p class="learn-issue">' + escapeHtml(String(pt.title || '')) + '</p>' +
+        (pt.detail ? '<p class="learn-why">' + escapeHtml(String(pt.detail)) + '</p>' : '') +
+        (pt.example ? '<p class="learn-example">' + escapeHtml(String(pt.example)) + '</p>' : '') +
+        '</div>';
+    });
+  } else {
+    html += '<p class="learn-why">这次没有额外的知识点。</p>';
+  }
+  html += '</div>';
+  html += '</div>';
+  museOut.innerHTML = html;
+}
+
+document.getElementById('btn-critique').addEventListener('click', () => evaluate('critique'));
+document.getElementById('btn-story').addEventListener('click', () => evaluate('story'));
+document.getElementById('btn-learn').addEventListener('click', () => evaluate('learn'));
+
+// ---------- 社群诗集墙（本地模拟，正式版接入后端） ----------
+const SEED_POSTS = [
+  {
+    id: 'seed-1',
+    type: 'poem',
+    author: '雅',
+    time: '2 小时前',
+    content: 'he counts stars\nshe paints with light\nsoon\nwe lit the dark',
+    likes: 32, liked: false, ref: null
+  },
+  {
+    id: 'seed-2',
+    type: 'story',
+    author: '舟',
+    time: '昨天',
+    content: '后来我才知道，那颗星是他数了整整一个夏天才敢指给她看的。她没有说话，只把画笔蘸进夜色里——于是“soon”不再是等待，而是他们一起把黑暗点亮之前，最后的安静。',
+    likes: 18, liked: false,
+    ref: { author: '雅', excerpt: 'he counts stars / she paints with light / soon / we lit the dark' }
+  }
+];
+
+const store = {
+  load() {
+    try {
+      const raw = localStorage.getItem('wih-posts');
+      if (raw) return JSON.parse(raw);
+    } catch (e) { /* 隐私模式等场景下降级为内存态 */ }
+    return null;
+  },
+  save(posts) {
+    try { localStorage.setItem('wih-posts', JSON.stringify(posts)); } catch (e) {}
+  }
+};
+
+let posts = store.load() || SEED_POSTS;
+
+const feedEl = document.getElementById('feed');
+
+function renderFeed() {
+  feedEl.innerHTML = '';
+  posts.forEach(p => feedEl.appendChild(renderPost(p)));
+}
+
+function renderPost(p) {
+  const el = document.createElement('article');
+  el.className = 'post';
+
+  const isPoem = p.type === 'poem';
+  const body = isPoem
+    ? p.content.split('\n').map(l => `<span class="verse">${escapeHtml(l)}</span>`).join('')
+    : `<p>${escapeHtml(p.content)}</p>`;
+
+  el.innerHTML = `
+    <div class="post-meta">
+      <span class="post-tag ${p.type}">${isPoem ? '拼贴诗' : '故事续写'}</span>
+      <span class="post-author">@${escapeHtml(p.author)}</span>
+      <span class="post-time">${escapeHtml(p.time)}</span>
+    </div>
+    <div class="post-body">${body}</div>
+    ${p.ref ? `<p class="post-ref">续写自 @${escapeHtml(p.ref.author)} 的句子 <em>${escapeHtml(p.ref.excerpt)}</em></p>` : ''}
+    <div class="post-actions">
+      <button class="btn-like ${p.liked ? 'liked' : ''}">
+        <span class="heart">${p.liked ? '♥' : '♡'}</span>
+        <span class="like-n">${p.likes}</span> 盏灯
+      </button>
+      <button class="btn-continue">续写这个故事 →</button>
+    </div>`;
+
+  el.querySelector('.btn-like').addEventListener('click', () => {
+    p.liked = !p.liked;
+    p.likes += p.liked ? 1 : -1;
+    store.save(posts);
+    renderFeed();
+  });
+  el.querySelector('.btn-continue').addEventListener('click', () => {
+    openPublish({
+      type: 'story',
+      ref: { author: p.author, excerpt: excerptOf(p) }
+    });
+  });
+  return el;
+}
+
+function excerptOf(p) {
+  const first = p.content.split('\n')[0];
+  return first.length > 40 ? first.slice(0, 40) + '…' : first;
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+// ---------- 发布 ----------
+let pubType = 'poem';
+let pubRef = null;
+
+const pubRefEl = document.getElementById('pub-ref');
+const pubContent = document.getElementById('pub-content');
+const pubLabel = document.getElementById('pub-content-label');
+
+function openPublish(opts = {}) {
+  pubRef = opts.ref || null;
+  setPubType(opts.type || 'poem');
+  if (pubRef) {
+    pubRefEl.innerHTML = `续写自 @${escapeHtml(pubRef.author)} 的句子 <em>${escapeHtml(pubRef.excerpt)}</em>`;
+    pubRefEl.classList.add('show');
+  } else {
+    pubRefEl.classList.remove('show');
+  }
+  pubContent.value = opts.content || '';
+  go('publish');
+  setTimeout(() => pubContent.focus(), 320);
+}
+
+function setPubType(t) {
+  pubType = t;
+  document.querySelectorAll('.pub-type').forEach(b =>
+    b.classList.toggle('active', b.dataset.type === t));
+  pubLabel.textContent = t === 'poem' ? '你的拼贴诗' : '你的续写故事';
+  pubContent.placeholder = t === 'poem'
+    ? 'he counts stars\nshe paints with light\nsoon\nwe lit the dark'
+    : '接着那句话，把故事往下写……';
+}
+document.querySelectorAll('.pub-type').forEach(b =>
+  b.addEventListener('click', () => setPubType(b.dataset.type)));
+
+document.getElementById('btn-new-post').addEventListener('click', () => openPublish());
+document.getElementById('btn-cancel-pub').addEventListener('click', () => go('community'));
+
+document.getElementById('btn-submit-pub').addEventListener('click', () => {
+  const content = pubContent.value.trim();
+  if (!content) {
+    pubContent.focus();
+    pubContent.placeholder = '先写点什么，再挂上墙吧——';
+    return;
+  }
+  const author = document.getElementById('pub-name').value.trim() || '匿名诗人';
+  posts.unshift({
+    id: 'p-' + Date.now(),
+    type: pubType,
+    author,
+    time: '刚刚',
+    content,
+    likes: 0, liked: false,
+    ref: pubRef
+  });
+  store.save(posts);
+  pubContent.value = '';
+  document.getElementById('pub-name').value = '';
+  renderFeed();
+  go('community');
+});
+
+// 缪斯间「分享到诗集墙」：生成过故事就分享故事，否则分享当前句子
+document.getElementById('btn-share').addEventListener('click', () => {
+  if (!sentence.length) return;
+  if (lastStory) openPublish({ type: 'story', content: lastStory });
+  else openPublish({ type: 'poem', content: sentenceText() });
+});
+
+// ---------- 初始化 ----------
+renderDevice();
+renderFeed();
+renderPage(pageFromHash());
+</script>
+
+<script type="module">
+import { WIHSerialBridge } from './serial-bridge.js';
+const button = document.getElementById('chip-toggle');
+const bridge = new WIHSerialBridge({
+  onWord(word) {
+    placeWord(word);
+    document.getElementById('hardware-word-status').textContent = `刚刚收到：${word}`;
+    // 从首页收到词块时自动进入拼贴台；其他页面只更新句子，不打断阅读。
+    if (currentPage === 'home') go('studio');
+  },
+  onStatus(status, state) {
+    deviceConnected = state.connected;
+    window.wihStatusText = status;
+    renderDevice();
+    button.textContent = state.running ? '断开连接' : '连接设备';
+    if (status.startsWith('连接中断') || status.startsWith('连接失败')) console.warn(status);
+  }
+});
+
+const importSentenceButton = document.getElementById('btn-import-sentence');
+const importStatus = document.getElementById('sentence-import-status');
+importSentenceButton.addEventListener('click', async () => {
+  importSentenceButton.disabled = true;
+  importStatus.textContent = '正在读取词块保存的整句…';
+  try {
+    const words = await bridge.requestSentence();
+    if (!words.length) {
+      importStatus.textContent = '这块词块还没有保存句子，请先在硬件上组成句子。';
+      return;
+    }
+    words.forEach(word => placeWord(word));
+    importStatus.textContent = `已放上 ${words.length} 个词：${words.join(' ')}`;
+  } catch (error) {
+    importStatus.textContent = error.message;
+  } finally {
+    importSentenceButton.disabled = false;
+  }
+});
+
+button.textContent = '连接设备';
+button.addEventListener('click', async () => {
+  button.disabled = true;
+  try {
+    if (bridge.running) await bridge.disconnect();
+    else await bridge.connect();
+  } catch (err) {
+    if (err.name !== 'NotFoundError') console.error('连接失败：', err);
+  }
+  finally { button.disabled = false; }
+});
+</script>
+</body>
+</html>
