@@ -28,6 +28,11 @@ static WebSerialEvents webSerial(writeWebEvent, canWriteWebEvent);
 static void serviceWebSerial(uint32_t now) {
     for (unsigned i = 0; i < 64 && Serial.available(); ++i)
         webSerial.receive(static_cast<char>(Serial.read()), game);
+    if (game.consumeUploadRequest()) {
+        bool started = webSerial.uploadSentence(game);
+        game.reportUpload(started);
+        Serial.printf("web: upload started=%d\n", started);
+    }
     webSerial.tick(now);
 }
 static bool protocolReady = false;
@@ -57,11 +62,14 @@ static void fillState(PersistState& s) {
         snprintf(s.sentenceSources[i], sizeof(s.sentenceSources[i]), "%s", sentence.source(i));
     }
     s.receiptCount = game.exportReceipts(s.receipts, 8);
+    s.standalone = game.standalone() ? 1 : 0;
+    s.insertPosition = game.insertPosition();
 }
 
 static bool applyState(const PersistState& s) {
     if (s.magic != STATE_MAGIC || s.first >= HISTORY_LEN || s.cur >= HISTORY_LEN ||
         s.last >= HISTORY_LEN || s.confirmed > 1 || s.receiptCount > 8 ||
+        s.standalone > 1 || s.insertPosition > s.sentenceCount ||
         s.sentenceCount > Sentence::MAX_WORDS ||
         (s.sentenceCount == 0 && s.sentenceCursor != 0) ||
         (s.sentenceCount > 0 && s.sentenceCursor >= s.sentenceCount)) return false;
@@ -96,7 +104,8 @@ static bool applyState(const PersistState& s) {
     picker.first = s.first;
     picker.cur = s.cur;
     picker.last = s.last;
-    game.restoreSentence(sentence, s.confirmed != 0, s.receipts, s.receiptCount);
+    game.restoreSentence(sentence, s.confirmed != 0, s.receipts, s.receiptCount,
+                         s.standalone != 0, s.insertPosition);
     return true;
 }
 
@@ -151,12 +160,19 @@ static void handleButtons(uint32_t now) {
                       game.view() == WordGame::View::Sentence ? "sentence" : "picker");
         lastActivityMs = now;
         break;
-    case BtnEvent::CLEAR:
-        game.pressClear(now);
+    case BtnEvent::LONG_CONFIRM:
+        game.pressLongConfirm(now);
         game.consumeDisplayRequest();
         markDirty(DisplayArea::Full);
-        Serial.printf("button CLEAR: mode=%d view=%s\n", static_cast<int>(game.editMode()),
+        Serial.printf("button HOLD A: mode=%d view=%s\n", static_cast<int>(game.editMode()),
                       game.view() == WordGame::View::Sentence ? "sentence" : "picker");
+        lastActivityMs = now;
+        break;
+    case BtnEvent::LONG_REFRESH:
+        game.pressLongRefresh(now);
+        game.consumeDisplayRequest();
+        markDirty(DisplayArea::Full);
+        Serial.printf("button HOLD B: mode=%d\n", static_cast<int>(game.editMode()));
         lastActivityMs = now;
         break;
     default:
@@ -191,22 +207,17 @@ static void draw(bool partial) {
         forceFullRefresh = false;
     }
     uint32_t drawStartMs = millis();
-    const char* status = protocolReady ? game.statusText() : "SET KIT / MEMBER IDS";
+    const char* status = protocolReady ? game.statusText() : "WIH NOT READY";
     Serial.printf("draw: full=%d view=%s cur=%s\n", full,
                   game.view() == WordGame::View::Sentence ? "sentence" : "picker",
                   game.currentWord());
     if (game.view() == WordGame::View::Sentence) {
-        const char* candidate = "";
-        if (node.connectedCount() == 1) {
-            wlp2::Port port = node.link(wlp2::Port::Left).up() ? wlp2::Port::Left : wlp2::Port::Right;
-            const WordGame::RemoteSnapshot& remote = game.remote(port);
-            if (remote.valid && remote.orderValid) candidate = remote.text;
-        }
         displayDrawSentence(game.sentence(), game.sentence().cursor(), game.editMode(),
-                            game.insertAfter(), candidate, status, !full);
+                            game.insertPosition(), status, !full);
     } else {
         displayDrawWords(game.picker().prevWord(), game.currentWord(), game.picker().nextWord(),
-                         game.confirmed(), !full, requestedArea, status);
+                         game.confirmed(), !full, requestedArea, status, game.standalone(),
+                         game.editMode() == SentenceEdit::StandaloneConfirm);
     }
     Serial.printf("draw: done full=%d area=%s elapsed=%lums\n", full,
                   requestedArea == DisplayArea::Center ? "center" : "screen",

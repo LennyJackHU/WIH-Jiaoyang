@@ -322,6 +322,7 @@ void setUp() {}
 void tearDown() {}
 void runGameTests();
 void runProtocolFaultTests();
+void runWebSerialTests();
 
 int main() {
     UNITY_BEGIN();
@@ -334,5 +335,6 @@ int main() {
     RUN_TEST(test_id_conflict_reassigns_persists_and_recovers);
     runProtocolFaultTests();
     runGameTests();
+    runWebSerialTests();
     return UNITY_END();
 }

@@ -50,7 +50,10 @@ bool WordGame::begin(const Identity& identity, uint32_t now) {
     status_ = Status::None;
     sentence_.clear();
     editMode_ = SentenceEdit::Navigate;
-    insertAfter_ = false;
+    confirmReturnMode_ = SentenceEdit::Navigate;
+    insertPosition_ = 0;
+    standalone_ = false;
+    uploadRequested_ = false;
     wordRev_ = 1;
     uiRevision_ = 0;
     receivedTransfers_ = 0;
@@ -106,6 +109,9 @@ const char* WordGame::statusText() const {
         case Status::Sent: return "SENT - NEW WORD";
         case Status::SlotBusy: return "SENTENCE FULL/BUSY";
         case Status::Invalid: return "TRANSFER REJECTED";
+        case Status::UploadBusy: return "UPLOAD BUSY";
+        case Status::Uploading: return "UPLOADING";
+        case Status::EmptySentence: return "NO SENTENCE";
         default: return "";
     }
 }
@@ -115,7 +121,7 @@ void WordGame::clearSentence() {
     sentence_.clear();
     view_ = View::Picker;
     editMode_ = SentenceEdit::Navigate;
-    insertAfter_ = false;
+    insertPosition_ = 0;
     saveRequested_ = true;
     changed();
 }
@@ -169,7 +175,7 @@ void WordGame::startPull(Port port, uint32_t now) {
     pullPending_ = true;
     makeRequest(pullReq_);
     copyValue(pullDst_, sizeof(pullDst_), peer.peerId);
-    pullPosition_ = sentence_.empty() ? 0 : sentence_.cursor() + (insertAfter_ ? 1 : 0);
+    pullPosition_ = insertPosition_;
     nextPullMs_ = now;
     statusUntil_ = 0;
     setStatus(Status::Sending);
@@ -185,91 +191,120 @@ void WordGame::clearPull() {
 
 void WordGame::pressEdit(uint32_t now) {
     now_ = now;
-    if (pending_ || pullPending_) return;
+    if (pending_ || pullPending_ || editMode_ == SentenceEdit::DeleteConfirm ||
+        editMode_ == SentenceEdit::ClearConfirm || editMode_ == SentenceEdit::StandaloneConfirm ||
+        editMode_ == SentenceEdit::UploadConfirm) return;
     editMode_ = SentenceEdit::Navigate;
-    insertAfter_ = false;
-    if (view_ == View::Picker) {
-        if (sentence_.empty() && sentence_.insert(0, currentWord(), "")) saveRequested_ = true;
-        view_ = View::Sentence;
-    } else {
-        view_ = View::Picker;
-    }
+    view_ = view_ == View::Picker ? View::Sentence : View::Picker;
     statusUntil_ = 0;
     setStatus(Status::None);
     changed();
 }
 
-void WordGame::pressClear(uint32_t now) {
+void WordGame::pressLongConfirm(uint32_t now) {
     now_ = now;
-    if (view_ != View::Sentence || pending_ || pullPending_) return;
-    if (editMode_ == SentenceEdit::ClearConfirm) {
-        clearSentence();
+    if (pending_ || pullPending_ || editMode_ == SentenceEdit::DeleteConfirm ||
+        editMode_ == SentenceEdit::ClearConfirm || editMode_ == SentenceEdit::StandaloneConfirm ||
+        editMode_ == SentenceEdit::UploadConfirm) return;
+    if (view_ == View::Picker) {
+        editMode_ = SentenceEdit::StandaloneConfirm;
         setStatus(Status::None);
+        changed();
         return;
     }
+    if (sentence_.empty()) {
+        setStatus(Status::EmptySentence);
+        return;
+    }
+    confirmReturnMode_ = editMode_;
+    editMode_ = SentenceEdit::UploadConfirm;
+    setStatus(Status::None);
+    changed();
+}
+
+void WordGame::pressLongRefresh(uint32_t now) {
+    now_ = now;
+    if (view_ != View::Sentence || sentence_.empty() || pending_ || pullPending_ ||
+        editMode_ == SentenceEdit::DeleteConfirm || editMode_ == SentenceEdit::ClearConfirm ||
+        editMode_ == SentenceEdit::UploadConfirm) return;
     editMode_ = SentenceEdit::ClearConfirm;
     setStatus(Status::None);
     changed();
 }
 
+bool WordGame::requestPositionedPull(uint32_t now) {
+    now_ = now;
+    if (view_ != View::Sentence || pending_ || pullPending_) return false;
+    if (sentence_.count() >= Sentence::MAX_WORDS) {
+        setStatus(Status::SlotBusy);
+        return false;
+    }
+    if (node_.connectedCount() == 0) {
+        setStatus(Status::NoLink);
+        return false;
+    }
+    if (node_.connectedCount() != 1) {
+        setStatus(Status::TwoLinks);
+        return false;
+    }
+    Port port = node_.link(Port::Left).up() ? Port::Left : Port::Right;
+    const RemoteSnapshot& snapshot = remote(port);
+    if (!snapshot.valid || !snapshot.orderValid) {
+        setStatus(Status::NoLink);
+        return false;
+    }
+    startPull(port, now);
+    return true;
+}
+
 void WordGame::pressConfirm(uint32_t now) {
     now_ = now;
     if (pending_ || pullPending_) return;
-    if (view_ == View::Sentence) {
-        if (editMode_ == SentenceEdit::ClearConfirm) {
-            editMode_ = SentenceEdit::Navigate;
-            setStatus(Status::None);
-            changed();
-            return;
+    if (editMode_ == SentenceEdit::StandaloneConfirm) {
+        standalone_ = !standalone_;
+        editMode_ = standalone_ ? SentenceEdit::InsertCursor : SentenceEdit::Navigate;
+        if (standalone_) {
+            view_ = View::Sentence;
+            insertPosition_ = sentence_.count();
         }
-        if (editMode_ == SentenceEdit::DeleteConfirm) {
-            if (sentence_.empty()) return;
+        saveRequested_ = true;
+        setStatus(Status::None);
+        changed();
+        return;
+    }
+    if (editMode_ == SentenceEdit::UploadConfirm) {
+        editMode_ = confirmReturnMode_;
+        uploadRequested_ = true;
+        changed();
+        return;
+    }
+    if (editMode_ == SentenceEdit::DeleteConfirm) {
+        if (!sentence_.empty()) {
             sentence_.remove(sentence_.cursor());
-            editMode_ = SentenceEdit::Navigate;
+            if (insertPosition_ > sentence_.count()) insertPosition_ = sentence_.count();
             saveRequested_ = true;
-            setStatus(Status::None);
-            changed();
-            return;
         }
-        if (editMode_ == SentenceEdit::InsertSide) {
-            if (sentence_.count() >= Sentence::MAX_WORDS) {
-                editMode_ = SentenceEdit::Navigate;
-                setStatus(Status::SlotBusy);
-                changed();
-                return;
+        editMode_ = SentenceEdit::Navigate;
+        setStatus(Status::None);
+        changed();
+        return;
+    }
+    if (editMode_ == SentenceEdit::ClearConfirm) {
+        clearSentence();
+        setStatus(Status::None);
+        return;
+    }
+    if (view_ == View::Sentence) {
+        if (editMode_ == SentenceEdit::InsertCursor) {
+            editMode_ = SentenceEdit::Navigate;
+            if (!sentence_.empty()) {
+                sentence_.setCursor(insertPosition_ < sentence_.count() ?
+                                    insertPosition_ : sentence_.count() - 1);
             }
-            if (node_.connectedCount() != 1) {
-                editMode_ = SentenceEdit::Navigate;
-                setStatus(Status::NoLink);
-                changed();
-                return;
-            }
-            Port port = node_.link(Port::Left).up() ? Port::Left : Port::Right;
-            startPull(port, now);
-            return;
+        } else {
+            insertPosition_ = sentence_.empty() ? 0 : sentence_.cursor() + 1;
+            editMode_ = SentenceEdit::InsertCursor;
         }
-        if (node_.connectedCount() == 0) {
-            if (sentence_.empty()) return;
-            editMode_ = SentenceEdit::DeleteConfirm;
-            setStatus(Status::None);
-            changed();
-            return;
-        }
-        if (node_.connectedCount() != 1) {
-            setStatus(Status::TwoLinks);
-            return;
-        }
-        Port port = node_.link(Port::Left).up() ? Port::Left : Port::Right;
-        const RemoteSnapshot& snapshot = remote(port);
-        if (!snapshot.valid || !snapshot.orderValid) {
-            setStatus(Status::NoLink);
-            return;
-        }
-        if (sentence_.count() >= Sentence::MAX_WORDS) {
-            setStatus(Status::SlotBusy);
-            return;
-        }
-        editMode_ = SentenceEdit::InsertSide;
         setStatus(Status::None);
         changed();
         return;
@@ -280,6 +315,23 @@ void WordGame::pressConfirm(uint32_t now) {
         setStatus(Status::None);
         saveRequested_ = true;
         changed();
+        return;
+    }
+    if (standalone_) {
+        if (insertPosition_ > sentence_.count()) insertPosition_ = sentence_.count();
+        if (!sentence_.insert(insertPosition_, currentWord(), "")) {
+            setStatus(Status::SlotBusy);
+            return;
+        }
+        view_ = View::Sentence;
+        editMode_ = SentenceEdit::InsertCursor;
+        insertPosition_ = sentence_.cursor() + 1;
+        confirmed_ = false;
+        picker_.refreshRandom();
+        saveRequested_ = true;
+        statusUntil_ = 0;
+        setStatus(Status::None);
+        localWordChanged();
         return;
     }
     if (node_.connectedCount() == 0) {
@@ -302,7 +354,6 @@ void WordGame::pressRefresh(uint32_t now) {
     if (pullPending_) {
         clearPull();
         editMode_ = SentenceEdit::Navigate;
-        insertAfter_ = false;
         setStatus(pending_ ? Status::Sending : Status::None);
         changed();
         return;
@@ -318,19 +369,27 @@ void WordGame::pressRefresh(uint32_t now) {
         changed();
         return;
     }
+    if (editMode_ == SentenceEdit::StandaloneConfirm) {
+        editMode_ = SentenceEdit::Navigate;
+        setStatus(Status::None);
+        changed();
+        return;
+    }
+    if (editMode_ == SentenceEdit::UploadConfirm) {
+        editMode_ = confirmReturnMode_;
+        setStatus(Status::None);
+        changed();
+        return;
+    }
     if (view_ == View::Sentence) {
-        if (editMode_ == SentenceEdit::DeleteConfirm || editMode_ == SentenceEdit::ClearConfirm) {
+        if (editMode_ == SentenceEdit::DeleteConfirm || editMode_ == SentenceEdit::ClearConfirm ||
+            editMode_ == SentenceEdit::InsertCursor) {
             editMode_ = SentenceEdit::Navigate;
-            setStatus(Status::None);
-            changed();
-        } else if (editMode_ == SentenceEdit::InsertSide) {
-            insertAfter_ = !insertAfter_;
-            setStatus(Status::None);
-            changed();
-        } else {
-            clearSentence();
-            setStatus(Status::None);
+        } else if (!sentence_.empty()) {
+            editMode_ = SentenceEdit::DeleteConfirm;
         }
+        setStatus(Status::None);
+        changed();
         return;
     }
     if (confirmed_) {
@@ -351,10 +410,20 @@ void WordGame::turnEncoder(int steps, uint32_t now) {
     if (steps == 0) return;
     if (view_ == View::Sentence) {
         if (editMode_ == SentenceEdit::DeleteConfirm || editMode_ == SentenceEdit::ClearConfirm ||
-            sentence_.empty()) return;
-        uint8_t previous = sentence_.cursor();
-        sentence_.moveCursor(steps);
-        if (sentence_.cursor() != previous) changed();
+            editMode_ == SentenceEdit::UploadConfirm) return;
+        if (editMode_ == SentenceEdit::InsertCursor) {
+            int next = static_cast<int>(insertPosition_) + steps;
+            if (next < 0) next = 0;
+            if (next > sentence_.count()) next = sentence_.count();
+            if (next != insertPosition_) {
+                insertPosition_ = static_cast<uint8_t>(next);
+                changed();
+            }
+        } else if (!sentence_.empty()) {
+            uint8_t previous = sentence_.cursor();
+            sentence_.moveCursor(steps);
+            if (sentence_.cursor() != previous) changed();
+        }
         if (!pending_ && !pullPending_) {
             statusUntil_ = 0;
             setStatus(Status::None);
@@ -452,17 +521,17 @@ void WordGame::receiveOffer(const NetMessage& message, const JsonReader& body) {
         sendError(message, req, "INVALID");
         return;
     }
-    bool positioned = body.contains("pos");
+    bool wirePositioned = body.contains("pos");
     uint32_t requestedPosition = 0;
-    if (positioned && !body.getUInt("pos", requestedPosition)) {
+    if (wirePositioned && !body.getUInt("pos", requestedPosition)) {
         sendError(message, req, "INVALID");
         return;
     }
     for (auto& existing : receipts_) {
         if (!existing.used || strcmp(existing.src, message.src) != 0 ||
             strcmp(existing.boot, message.boot) != 0 || strcmp(existing.req, req) != 0) continue;
-        if (strcmp(existing.text, text) != 0 || existing.positioned != positioned ||
-            (positioned && existing.position != requestedPosition)) {
+        if (strcmp(existing.text, text) != 0 ||
+            (wirePositioned && (!existing.positioned || existing.position != requestedPosition))) {
             sendError(message, req, "INVALID");
             return;
         }
@@ -473,9 +542,11 @@ void WordGame::receiveOffer(const NetMessage& message, const JsonReader& body) {
         existing.ackPending = true;
         return;
     }
-    uint8_t position = positioned ? static_cast<uint8_t>(requestedPosition) :
-        (message.ingress == Port::Left ? 0 : sentence_.count());
-    if (sentence_.count() >= Sentence::MAX_WORDS || requestedPosition > sentence_.count()) {
+    bool cursorPositioned = !wirePositioned && view_ == View::Sentence &&
+                            editMode_ == SentenceEdit::InsertCursor;
+    uint8_t position = wirePositioned ? static_cast<uint8_t>(requestedPosition) :
+        cursorPositioned ? insertPosition_ : (message.ingress == Port::Left ? 0 : sentence_.count());
+    if (sentence_.count() >= Sentence::MAX_WORDS || position > sentence_.count()) {
         sendError(message, req, "BUSY");
         setStatus(Status::SlotBusy);
         return;
@@ -508,17 +579,18 @@ void WordGame::receiveOffer(const NetMessage& message, const JsonReader& body) {
     receipt->used = true;
     receipt->ackPending = true;
     receipt->side = message.ingress;
-    receipt->positioned = positioned;
+    receipt->positioned = wirePositioned || cursorPositioned;
     receipt->position = position;
     receipt->order = nextReceiptOrder_++;
     copyValue(receipt->src, sizeof(receipt->src), message.src);
     copyValue(receipt->boot, sizeof(receipt->boot), message.boot);
     copyValue(receipt->req, sizeof(receipt->req), req);
     copyValue(receipt->text, sizeof(receipt->text), text);
-    if (pullPending_ && positioned && strcmp(pullReq_, req) == 0 &&
+    if (pullPending_ && wirePositioned && strcmp(pullReq_, req) == 0 &&
         strcmp(pullDst_, message.src) == 0 && pullPosition_ == position) clearPull();
     view_ = View::Sentence;
-    editMode_ = SentenceEdit::Navigate;
+    editMode_ = cursorPositioned ? SentenceEdit::InsertCursor : SentenceEdit::Navigate;
+    if (cursorPositioned) insertPosition_ = position + 1;
     ++receivedTransfers_;
     saveRequested_ = true;
     statusUntil_ = now_ + 1800;
@@ -696,10 +768,6 @@ void WordGame::onLinkChanged(Port port) {
     Remote& remote = remotes_[portIndex(port)];
     remote = Remote();
     remote.lastQuery = now_ - 500;
-    if (editMode_ == SentenceEdit::InsertSide && node_.connectedCount() != 1) {
-        editMode_ = SentenceEdit::Navigate;
-        insertAfter_ = false;
-    }
     changed();
     char body[48];
     JsonWriter out(body, sizeof(body));
@@ -752,7 +820,6 @@ void WordGame::onNet(const NetMessage& message, const JsonReader& body) {
             } else {
                 clearPull();
                 editMode_ = SentenceEdit::Navigate;
-                insertAfter_ = false;
             }
             setStatus(Status::Invalid);
         }
@@ -829,7 +896,8 @@ void WordGame::restoreReceipts(const ReceiptState* states, uint8_t receiptCount)
 }
 
 void WordGame::restoreSentence(const Sentence& value, bool confirmed,
-                               const ReceiptState* receipts, uint8_t receiptCount) {
+                               const ReceiptState* receipts, uint8_t receiptCount,
+                               bool standalone, uint8_t insertPosition) {
     Sentence copy = value;
     confirmed_ = confirmed;
     pending_ = false;
@@ -847,9 +915,12 @@ void WordGame::restoreSentence(const Sentence& value, bool confirmed,
     }
     sentence_.setCursor(copy.cursor());
     restoreReceipts(receipts, receiptCount);
-    view_ = hasSentence() ? View::Sentence : View::Picker;
+    standalone_ = standalone;
+    insertPosition_ = insertPosition <= sentence_.count() ? insertPosition : sentence_.count();
+    view_ = hasSentence() || standalone_ ? View::Sentence : View::Picker;
     editMode_ = SentenceEdit::Navigate;
-    insertAfter_ = false;
+    confirmReturnMode_ = SentenceEdit::Navigate;
+    uploadRequested_ = false;
     status_ = Status::None;
     statusUntil_ = 0;
     saveRequested_ = false;
@@ -896,4 +967,15 @@ bool WordGame::consumeDisplayRequest() {
     bool requested = displayRequested_;
     displayRequested_ = false;
     return requested;
+}
+
+bool WordGame::consumeUploadRequest() {
+    bool requested = uploadRequested_;
+    uploadRequested_ = false;
+    return requested;
+}
+
+void WordGame::reportUpload(bool started) {
+    statusUntil_ = now_ + 1800;
+    setStatus(started ? Status::Uploading : Status::UploadBusy);
 }

@@ -17,6 +17,9 @@ public:
         Sent,
         SlotBusy,
         Invalid,
+        UploadBusy,
+        Uploading,
+        EmptySentence,
     };
 
     struct NeighborSnapshot {
@@ -58,7 +61,9 @@ public:
     void pressConfirm(uint32_t now);
     void pressRefresh(uint32_t now);
     void pressEdit(uint32_t now);
-    void pressClear(uint32_t now);
+    void pressLongConfirm(uint32_t now);
+    void pressLongRefresh(uint32_t now);
+    bool requestPositionedPull(uint32_t now);
     void turnEncoder(int steps, uint32_t now);
 
     void onLinkChanged(wlp2::Port port) override;
@@ -73,7 +78,8 @@ public:
     const char* statusText() const;
     const Sentence& sentence() const { return sentence_; }
     SentenceEdit editMode() const { return editMode_; }
-    bool insertAfter() const { return insertAfter_; }
+    uint8_t insertPosition() const { return insertPosition_; }
+    bool standalone() const { return standalone_; }
     const char* leftWord() const { return sentence_.text(0); }
     const char* rightWord() const {
         return sentence_.empty() ? "" : sentence_.text(sentence_.count() - 1);
@@ -97,10 +103,13 @@ public:
                  const char* leftSource = "", const char* rightSource = "",
                  const ReceiptState* receipts = nullptr, uint8_t receiptCount = 0);
     void restoreSentence(const Sentence& sentence, bool confirmed,
-                         const ReceiptState* receipts = nullptr, uint8_t receiptCount = 0);
+                         const ReceiptState* receipts = nullptr, uint8_t receiptCount = 0,
+                         bool standalone = false, uint8_t insertPosition = 0);
     uint8_t exportReceipts(ReceiptState* out, uint8_t capacity) const;
     bool consumeSaveRequest();
     bool consumeDisplayRequest();
+    bool consumeUploadRequest();
+    void reportUpload(bool started);
 
 private:
     struct Remote {
@@ -161,7 +170,10 @@ private:
     Status status_ = Status::None;
     Sentence sentence_;
     SentenceEdit editMode_ = SentenceEdit::Navigate;
-    bool insertAfter_ = false;
+    SentenceEdit confirmReturnMode_ = SentenceEdit::Navigate;
+    uint8_t insertPosition_ = 0;
+    bool standalone_ = false;
+    bool uploadRequested_ = false;
     uint32_t wordRev_ = 0;
     uint32_t uiRevision_ = 0;
     uint32_t receivedTransfers_ = 0;

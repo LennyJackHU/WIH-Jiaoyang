@@ -16,9 +16,11 @@ struct PersistState {
     char sentenceSources[Sentence::MAX_WORDS][17];
     uint8_t receiptCount;
     WordGame::ReceiptState receipts[8];
+    uint8_t standalone;
+    uint8_t insertPosition;
 };
 
-#define STATE_MAGIC 0x57494834u // "WIH4"
+#define STATE_MAGIC 0x57494835u // "WIH5"
 
 // NVS (flash) persistence - survives power cycles.
 bool storageLoadNvs(PersistState& out);

@@ -1553,6 +1553,11 @@ const bridge = new WIHSerialBridge({
     // 从首页收到词块时自动进入拼贴台；其他页面只更新句子，不打断阅读。
     if (currentPage === 'home') go('studio');
   },
+  onSentence(words) {
+    words.forEach(word => placeWord(word));
+    document.getElementById('sentence-import-status').textContent =
+      `模块已上传 ${words.length} 个词：${words.join(' ')}`;
+  },
   onStatus(status, state) {
     deviceConnected = state.connected;
     window.wihStatusText = status;

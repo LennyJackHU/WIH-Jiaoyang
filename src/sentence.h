@@ -3,7 +3,14 @@
 #include <stdint.h>
 #include "wlp2_json.h"
 
-enum class SentenceEdit : uint8_t { Navigate, DeleteConfirm, InsertSide, ClearConfirm };
+enum class SentenceEdit : uint8_t {
+    Navigate,
+    InsertCursor,
+    DeleteConfirm,
+    ClearConfirm,
+    StandaloneConfirm,
+    UploadConfirm
+};
 
 class Sentence {
 public:

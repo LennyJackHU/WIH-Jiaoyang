@@ -20,11 +20,11 @@ enum class DisplayArea : uint8_t { Full, Center };
 // confirmed inverts the center band to signal the confirmed selection.
 void displayDrawWords(const char* prev, const char* cur, const char* next,
                       bool confirmed, bool partial, DisplayArea area,
-                      const char* status = nullptr);
+                      const char* status = nullptr, bool standalone = false,
+                      bool standaloneConfirm = false);
 
 void displayDrawSentence(const Sentence& sentence, uint8_t cursor, SentenceEdit edit,
-                         bool insertAfter, const char* candidate, const char* status,
-                         bool partial);
+                         uint8_t insertPosition, const char* status, bool partial);
 
 // Puts the panel into deep sleep. The next refresh requires displayInit().
 void displayHibernate();

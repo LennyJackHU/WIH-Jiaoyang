@@ -4,7 +4,6 @@
 // Counts per detent of a typical EC11 encoder in full-quad mode.
 static const int ENC_COUNTS_PER_STEP = 4;
 static const uint32_t BTN_LONG_MS = 800;
-static const uint32_t BTN_DOUBLE_MS = 350;
 
 static ESP32Encoder encoder;
 static int64_t lastCount = 0;
@@ -12,7 +11,7 @@ static int stepRemainder = 0;
 
 struct DebouncedButton {
     uint8_t pin;
-    bool activeLow;   // detected at boot: idle HIGH -> active low
+    bool activeLow;
     bool stable;
     bool lastReading;
     uint32_t lastChangeMs;
@@ -63,7 +62,7 @@ void inputInit() {
     encoder.clearCount();
     lastCount = 0;
     stepRemainder = 0;
-    buttonConfigure(btnSW, PIN_ENC_SW, true);  // EC11 switch is normally open to GND
+    buttonConfigure(btnSW, PIN_ENC_SW, true);
     buttonInit(btnA, PIN_BTN_A);
     buttonInit(btnB, PIN_BTN_B);
 }
@@ -98,9 +97,6 @@ static bool pressed(DebouncedButton& b) {
 static BtnEvent pendingSingle = BtnEvent::NONE;
 static uint32_t pendingSingleMs = 0;
 static bool chordLatched = false;
-static bool aClickPending = false;
-static bool aSecondClick = false;
-static uint32_t aClickMs = 0;
 
 BtnEvent inputPollButtons() {
     uint32_t now = millis();
@@ -114,63 +110,38 @@ BtnEvent inputPollButtons() {
     }
     if (swPressed) {
         pendingSingle = BtnEvent::NONE;
-        aClickPending = false;
-        aSecondClick = false;
         return BtnEvent::EDIT;
     }
     if (aPressed && bPressed) {
         pendingSingle = BtnEvent::NONE;
-        aClickPending = false;
-        aSecondClick = false;
         chordLatched = true;
         return BtnEvent::EDIT;
     }
     if (aPressed || bPressed) {
         if (pendingSingle != BtnEvent::NONE) {
             pendingSingle = BtnEvent::NONE;
-            aClickPending = false;
-            aSecondClick = false;
             chordLatched = true;
             return BtnEvent::EDIT;
         }
-        aSecondClick = aPressed && aClickPending && now - aClickMs <= BTN_DOUBLE_MS;
-        aClickPending = false;
         pendingSingle = aPressed ? BtnEvent::CONFIRM : BtnEvent::REFRESH;
         pendingSingleMs = now;
         return BtnEvent::NONE;
     }
-    if (pendingSingle == BtnEvent::REFRESH) {
-        if (btnB.stable != pressedLevel(btnB)) {
+
+    DebouncedButton& button = pendingSingle == BtnEvent::CONFIRM ? btnA : btnB;
+    if (pendingSingle == BtnEvent::CONFIRM || pendingSingle == BtnEvent::REFRESH) {
+        if (button.stable != pressedLevel(button)) {
+            BtnEvent event = pendingSingle;
             pendingSingle = BtnEvent::NONE;
-            return BtnEvent::REFRESH;
+            return event;
         }
         if (now - pendingSingleMs >= BTN_LONG_MS) {
+            BtnEvent event = pendingSingle == BtnEvent::CONFIRM ?
+                BtnEvent::LONG_CONFIRM : BtnEvent::LONG_REFRESH;
             pendingSingle = BtnEvent::NONE;
             chordLatched = true;
-            return BtnEvent::CLEAR;
+            return event;
         }
-    } else if (pendingSingle == BtnEvent::CONFIRM) {
-        if (btnA.stable != pressedLevel(btnA)) {
-            pendingSingle = BtnEvent::NONE;
-            if (aSecondClick) {
-                aSecondClick = false;
-                return BtnEvent::CLEAR;
-            }
-            aClickPending = true;
-            aClickMs = now;
-            return BtnEvent::NONE;
-        }
-        if (now - pendingSingleMs >= BTN_LONG_MS) {
-            pendingSingle = BtnEvent::NONE;
-            aClickPending = false;
-            aSecondClick = false;
-            chordLatched = true;
-            return BtnEvent::EDIT;
-        }
-    }
-    if (aClickPending && now - aClickMs >= BTN_DOUBLE_MS) {
-        aClickPending = false;
-        return BtnEvent::CONFIRM;
     }
     return BtnEvent::NONE;
 }

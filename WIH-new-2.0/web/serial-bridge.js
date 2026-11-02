@@ -1,7 +1,8 @@
 // USB-to-UART console, 115200 baud; sentence snapshots are explicitly requested.
 export class WIHSerialBridge {
-  constructor({ onWord, onStatus = () => {}, serial = null }) {
+  constructor({ onWord, onSentence = () => {}, onStatus = () => {}, serial = null }) {
     this.onWord = onWord;
+    this.onSentence = onSentence;
     this.onStatus = onStatus;
     this.serial = serial;
     this.port = null;
@@ -14,6 +15,7 @@ export class WIHSerialBridge {
     this.status = '未连接';
     this.seen = new Set();
     this.pendingSentence = null;
+    this.pendingUpload = null;
     this.writePromise = null;
     this.sentenceExport = false;
     this.identity = null;
@@ -63,6 +65,10 @@ export class WIHSerialBridge {
       this.acceptSentence(msg);
       return;
     }
+    if (modern && ['upload_begin', 'upload_word', 'upload_end'].includes(msg.type)) {
+      this.acceptUpload(msg);
+      return;
+    }
     if (msg.type !== 'word_confirmed' || typeof msg.word !== 'string' ||
         !msg.word.trim() || /[\u0000-\u001f\u007f]/.test(msg.word) ||
         new TextEncoder().encode(msg.word).length > 96) return;
@@ -83,6 +89,33 @@ export class WIHSerialBridge {
     }
     try { this.onWord(msg.word, msg); }
     catch (err) { console.error('网页处理词块失败', err); }
+  }
+
+  acceptUpload(msg) {
+    if (typeof msg.request !== 'string' || !/^[0-9a-f]{16}$/i.test(msg.request) ||
+        !Number.isInteger(msg.count) || msg.count < 1 || msg.count > 12) return;
+    if (this.identity && (this.identity.device !== msg.device || this.identity.session !== msg.session))
+      return;
+    if (msg.type === 'upload_begin') {
+      this.pendingUpload = { request: msg.request, count: msg.count, words: [] };
+      return;
+    }
+    const upload = this.pendingUpload;
+    if (!upload || upload.request !== msg.request || upload.count !== msg.count) return;
+    if (msg.type === 'upload_word') {
+      if (!Number.isInteger(msg.index) || msg.index < 0 || msg.index >= msg.count ||
+          typeof msg.word !== 'string' || !msg.word.trim() ||
+          /[\u0000-\u001f\u007f]/.test(msg.word) ||
+          new TextEncoder().encode(msg.word).length > 96) return;
+      if (upload.words[msg.index] !== undefined && upload.words[msg.index] !== msg.word) return;
+      upload.words[msg.index] = msg.word;
+      return;
+    }
+    for (let i = 0; i < upload.count; i++) if (upload.words[i] === undefined) return;
+    const words = upload.words.slice(0, upload.count);
+    this.pendingUpload = null;
+    try { this.onSentence(words, msg); }
+    catch (err) { console.error('网页处理上传句子失败', err); }
   }
 
   acceptChunk(bytes) {
