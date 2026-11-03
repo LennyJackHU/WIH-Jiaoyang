@@ -42,42 +42,60 @@ static uint16_t textWidth(const GFXfont* font, const char* text) {
     return w;
 }
 
-static void fitText(const GFXfont* font, const char* text, int16_t maxWidth,
-                    char* out, size_t capacity) {
-    if (!text) {
-        out[0] = '\0';
-        return;
-    }
-    snprintf(out, capacity, "%s", text);
-    if (textWidth(font, out) <= maxWidth) return;
-    size_t len = strlen(out);
-    while (len > 0) {
-        --len;
-        while (len > 0 && (static_cast<unsigned char>(out[len]) & 0xC0) == 0x80) --len;
-        out[len] = '\0';
-        char candidate[wlp2::TEXT_MAX + 4];
-        snprintf(candidate, sizeof(candidate), "%s...", out);
-        if (textWidth(font, candidate) <= maxWidth) {
-            snprintf(out, capacity, "%s", candidate);
-            return;
+static void drawWrappedIn(const char* value, int16_t x, int16_t y,
+                          int16_t w, int16_t h, uint16_t color) {
+    if (!value || !value[0] || w < 6 || h < 8) return;
+    const uint8_t maxLines = h >= 32 ? 4 : (h >= 24 ? 3 : (h >= 16 ? 2 : 1));
+    char lines[4][wlp2::TEXT_MAX + 1];
+    uint8_t count = 0;
+    const char* cursor = value;
+    epd.setFont(nullptr);
+    epd.setTextSize(1);
+    while (*cursor && count < maxLines) {
+        while (*cursor == ' ') ++cursor;
+        if (!*cursor) break;
+        const size_t remaining = strlen(cursor);
+        size_t take = remaining;
+        if (textWidth(nullptr, cursor) > w) {
+            const size_t maxChars = static_cast<size_t>(w / 6);
+            take = remaining < maxChars ? remaining : maxChars;
+            if (take < remaining) {
+                size_t space = take;
+                while (space > 0 && cursor[space] != ' ') --space;
+                if (space > 0) take = space;
+            }
         }
+        size_t length = take;
+        while (length > 0 && cursor[length - 1] == ' ') --length;
+        memcpy(lines[count], cursor, length);
+        lines[count][length] = '\0';
+        ++count;
+        cursor += take;
     }
-    snprintf(out, capacity, ".");
+    const int16_t startY = y + (h - static_cast<int16_t>(count) * 8) / 2;
+    epd.setTextColor(color);
+    for (uint8_t i = 0; i < count; ++i) {
+        epd.setCursor(x + (w - textWidth(nullptr, lines[i])) / 2, startY + i * 8);
+        epd.print(lines[i]);
+    }
+    epd.setTextColor(GxEPD_BLACK);
 }
 
 static void drawCenteredIn(const char* value, const GFXfont* font,
                            int16_t x, int16_t y, int16_t w, int16_t h,
                            uint16_t color) {
     if (!value || !value[0]) return;
-    char fitted[wlp2::TEXT_MAX + 4];
-    fitText(font, value, w - 8, fitted, sizeof(fitted));
+    if (textWidth(font, value) > w - 8) {
+        drawWrappedIn(value, x + 4, y + 2, w - 8, h - 4, color);
+        return;
+    }
     epd.setFont(font);
     int16_t bx, by;
     uint16_t bw, bh;
-    epd.getTextBounds(fitted, 0, 0, &bx, &by, &bw, &bh);
+    epd.getTextBounds(value, 0, 0, &bx, &by, &bw, &bh);
     epd.setCursor(x + (w - bw) / 2 - bx, y + (h - bh) / 2 - by);
     epd.setTextColor(color);
-    epd.print(fitted);
+    epd.print(value);
     epd.setTextColor(GxEPD_BLACK);
 }
 
@@ -87,6 +105,7 @@ static const GFXfont* wordFont(const char* word, bool large, int16_t maxWidth,
         fitted[0] = '\0';
         return &FreeSans9pt7b;
     }
+    snprintf(fitted, capacity, "%s", word);
     const bool phrase = strchr(word, ' ') != nullptr;
     const size_t length = strlen(word);
     const GFXfont* candidates[5];
@@ -107,14 +126,9 @@ static const GFXfont* wordFont(const char* word, bool large, int16_t maxWidth,
         candidates[count++] = &FreeSerifItalic12pt7b;
         candidates[count++] = &FreeSans9pt7b;
     }
-    candidates[count++] = nullptr;
     for (uint8_t i = 0; i < count; ++i) {
-        fitText(candidates[i], word, maxWidth, fitted, capacity);
-        if (textWidth(candidates[i], fitted) <= maxWidth && strcmp(fitted, word) == 0) {
-            return candidates[i];
-        }
+        if (textWidth(candidates[i], word) <= maxWidth) return candidates[i];
     }
-    fitText(nullptr, word, maxWidth, fitted, capacity);
     return nullptr;
 }
 
@@ -153,6 +167,8 @@ static void renderWords(const char* prev, const char* cur, const char* next,
         epd.fillTriangle(15, 166, 10, 159, 20, 159, GxEPD_BLACK);
         drawPaper(next, 38, 147, 145, 29, false);
         const char* hint = standaloneConfirm ? "A:CONFIRM  B:CANCEL" :
+            standalone ? (confirmed ? "A:ADD  B:CANCEL  HOLD A:EXIT" :
+                                      "A:KEEP  B:SHUFFLE  HOLD A:EXIT") :
             confirmed ? "A:SEND  B:CANCEL  HOLD A:SOLO" :
             "A:KEEP  B:SHUFFLE  HOLD A:SOLO";
         drawSmallLabel(hint, (SCREEN_W - textWidth(nullptr, hint)) / 2, 187);
@@ -166,21 +182,19 @@ static void renderWords(const char* prev, const char* cur, const char* next,
     }
 }
 
-static void drawSentenceHeader(const char* status, uint8_t pieces) {
+static void drawSentenceHeader(const char* status, uint8_t pieces,
+                               uint8_t page, uint8_t pages) {
     epd.fillRect(0, 0, SCREEN_W, 29, GxEPD_BLACK);
     drawSmallLabel(status && status[0] ? status : "MY COLLAGE", 10, 18, GxEPD_WHITE);
-    char number[8];
-    snprintf(number, sizeof(number), "%02u", pieces);
-    drawSmallLabel(number, 176, 18, GxEPD_WHITE);
+    char number[12];
+    if (pages > 1) snprintf(number, sizeof(number), "P%u/%u", page + 1, pages);
+    else snprintf(number, sizeof(number), "%02u", pieces);
+    drawSmallLabel(number, SCREEN_W - 10 - textWidth(nullptr, number), 18, GxEPD_WHITE);
 }
 
 static void drawFooter(const char* first, const char* second = nullptr) {
     drawSmallLabel(first, (SCREEN_W - textWidth(nullptr, first)) / 2, second ? 182 : 188);
     if (second) drawSmallLabel(second, (SCREEN_W - textWidth(nullptr, second)) / 2, 194);
-}
-
-static void drawUnderline(int16_t x, int16_t y, int16_t w, int16_t h) {
-    epd.drawFastHLine(x + 5, y + h - 4, w - 10, GxEPD_BLACK);
 }
 
 static void drawCaret(int16_t x, int16_t y, int16_t h) {
@@ -189,50 +203,56 @@ static void drawCaret(int16_t x, int16_t y, int16_t h) {
     epd.fillRect(x, y, 3, h, GxEPD_BLACK);
 }
 
-static void drawSentenceCollage(const Sentence& sentence, uint8_t cursor,
-                                SentenceEdit edit, uint8_t insertPosition) {
-    static const int16_t layout1[][4] = {
-        {30, 62, 140, 62},
-    };
-    static const int16_t layout2[][4] = {
-        {18, 46, 119, 44}, {62, 112, 126, 46},
-    };
-    static const int16_t layout3[][4] = {
-        {29, 38, 112, 34}, {48, 82, 121, 42}, {27, 134, 163, 34},
-    };
-    uint8_t count = sentence.count();
-    const int16_t (*layout)[4] = count == 1 ? layout1 : (count == 2 ? layout2 : layout3);
-    for (uint8_t i = 0; i < count; ++i) {
-        drawPaper(sentence.text(i), layout[i][0], layout[i][1], layout[i][2], layout[i][3],
-                  false, count <= 2);
-        if (edit != SentenceEdit::InsertCursor && i == cursor)
-            drawUnderline(layout[i][0], layout[i][1], layout[i][2], layout[i][3]);
-    }
-    if (edit == SentenceEdit::InsertCursor) {
-        uint8_t i = insertPosition < count ? insertPosition : count - 1;
-        int16_t x = insertPosition < count ? layout[i][0] - 7 :
-                    layout[i][0] + layout[i][2] + 4;
-        drawCaret(x, layout[i][1] + 4, layout[i][3] - 8);
+static void drawSentenceCell(const char* word, uint8_t position, bool own,
+                             bool selected, int16_t x, int16_t y) {
+    const int16_t w = 89;
+    const int16_t h = 36;
+    const uint16_t foreground = selected ? GxEPD_WHITE : GxEPD_BLACK;
+    if (selected) epd.fillRect(x, y, w, h, GxEPD_BLACK);
+    else epd.drawRect(x, y, w, h, GxEPD_BLACK);
+
+    char number[4];
+    snprintf(number, sizeof(number), "%02u", position + 1);
+    drawSmallLabel(number, x + 4, y + 9, foreground);
+    if (own) epd.fillRect(x + w - 7, y + 4, 3, 3, foreground);
+
+    if (word && word[0]) {
+        char fitted[wlp2::TEXT_MAX + 4];
+        const GFXfont* font = wordFont(word, false, w - 22, fitted, sizeof(fitted));
+        if (font) drawCenteredIn(fitted, font, x + 13, y + 2, w - 17, h - 4, foreground);
+        else drawWrappedIn(fitted, x + 3, y + 10, w - 6, h - 12, foreground);
     }
 }
 
-static void drawSentenceList(const Sentence& sentence, uint8_t cursor,
+static void drawSentenceGrid(const Sentence& sentence, uint8_t cursor,
                              SentenceEdit edit, uint8_t insertPosition) {
-    uint8_t count = sentence.count();
-    const int16_t gap = count > 6 ? 1 : 3;
-    const int16_t rowH = (134 - gap * (count - 1)) / count;
-    const GFXfont* font = count > 6 ? nullptr : &FreeSans9pt7b;
-    for (uint8_t i = 0; i < count; ++i) {
-        int16_t y = 35 + i * (rowH + gap);
-        epd.drawRect(26, y, 154, rowH, GxEPD_BLACK);
-        drawCenteredIn(sentence.text(i), font, 29, y, 148, rowH, GxEPD_BLACK);
-        if (edit != SentenceEdit::InsertCursor && i == cursor)
-            drawUnderline(26, y, 154, rowH);
+    static const uint8_t PAGE_SIZE = 6;
+    const uint8_t count = sentence.count();
+    uint8_t anchor = cursor;
+    if (edit == SentenceEdit::InsertCursor) {
+        anchor = insertPosition < count ? insertPosition : (count ? count - 1 : 0);
+    }
+    const uint8_t pageStart = sentence.empty() ? 0 : (anchor / PAGE_SIZE) * PAGE_SIZE;
+    for (uint8_t slot = 0; slot < PAGE_SIZE; ++slot) {
+        const uint8_t index = pageStart + slot;
+        const bool present = index < count;
+        const int16_t x = 8 + (slot % 2) * 95;
+        const int16_t y = 37 + (slot / 2) * 42;
+        drawSentenceCell(present ? sentence.text(index) : "", index,
+                         present && sentence.source(index)[0] == '\0',
+                         present && edit != SentenceEdit::InsertCursor && index == cursor, x, y);
     }
     if (edit == SentenceEdit::InsertCursor) {
-        uint8_t i = insertPosition < count ? insertPosition : count - 1;
-        int16_t y = 35 + i * (rowH + gap);
-        drawCaret(insertPosition < count ? 20 : 184, y + 2, rowH - 4);
+        if (count == 0) {
+            drawCaret(4, 41, 28);
+        } else {
+            const bool before = insertPosition < count;
+            const uint8_t index = before ? insertPosition : count - 1;
+            const uint8_t slot = index - pageStart;
+            const int16_t cellX = 8 + (slot % 2) * 95;
+            const int16_t cellY = 37 + (slot / 2) * 42;
+            drawCaret(before ? cellX - 4 : cellX + 91, cellY + 4, 28);
+        }
     }
 }
 
@@ -243,16 +263,15 @@ static void renderSentence(const Sentence& sentence, uint8_t cursor, SentenceEdi
     if (edit == SentenceEdit::ClearConfirm) title = "CLEAR COLLAGE?";
     else if (edit == SentenceEdit::DeleteConfirm) title = "DELETE THIS PIECE?";
     else if (edit == SentenceEdit::UploadConfirm) title = "UPLOAD TO COMPUTER?";
-    drawSentenceHeader(title, sentence.count());
-
-    if (sentence.empty()) {
-        drawCenteredIn("Empty collage", &FreeSerif18pt7b, 15, 62, 170, 70, GxEPD_BLACK);
-        if (edit == SentenceEdit::InsertCursor) drawCaret(99, 72, 45);
-    } else if (sentence.count() <= 3) {
-        drawSentenceCollage(sentence, cursor, edit, insertPosition);
-    } else {
-        drawSentenceList(sentence, cursor, edit, insertPosition);
+    const uint8_t pages = sentence.empty() ? 1 : (sentence.count() + 5) / 6;
+    uint8_t anchor = cursor;
+    if (edit == SentenceEdit::InsertCursor) {
+        anchor = insertPosition < sentence.count() ? insertPosition :
+                 (sentence.empty() ? 0 : sentence.count() - 1);
     }
+    const uint8_t page = sentence.empty() ? 0 : anchor / 6;
+    drawSentenceHeader(title, sentence.count(), page, pages);
+    drawSentenceGrid(sentence, cursor, edit, insertPosition);
 
     epd.drawFastHLine(10, 174, 180, GxEPD_BLACK);
     if (edit == SentenceEdit::ClearConfirm) {
