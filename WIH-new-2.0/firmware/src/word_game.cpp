@@ -213,7 +213,11 @@ void WordGame::pressLongConfirm(uint32_t now) {
         return;
     }
     if (sentence_.empty()) {
-        setStatus(Status::EmptySentence);
+        view_ = View::Picker;
+        editMode_ = SentenceEdit::Navigate;
+        insertPosition_ = 0;
+        setStatus(Status::None);
+        changed();
         return;
     }
     confirmReturnMode_ = editMode_;
@@ -261,12 +265,12 @@ void WordGame::pressConfirm(uint32_t now) {
     now_ = now;
     if (pending_ || pullPending_) return;
     if (editMode_ == SentenceEdit::StandaloneConfirm) {
+        sentence_.clear();
+        confirmed_ = false;
+        insertPosition_ = 0;
         standalone_ = !standalone_;
+        view_ = standalone_ ? View::Sentence : View::Picker;
         editMode_ = standalone_ ? SentenceEdit::InsertCursor : SentenceEdit::Navigate;
-        if (standalone_) {
-            view_ = View::Sentence;
-            insertPosition_ = sentence_.count();
-        }
         saveRequested_ = true;
         setStatus(Status::None);
         changed();
@@ -387,6 +391,8 @@ void WordGame::pressRefresh(uint32_t now) {
             editMode_ = SentenceEdit::Navigate;
         } else if (!sentence_.empty()) {
             editMode_ = SentenceEdit::DeleteConfirm;
+        } else {
+            view_ = View::Picker;
         }
         setStatus(Status::None);
         changed();

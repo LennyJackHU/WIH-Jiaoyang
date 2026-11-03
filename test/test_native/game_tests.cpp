@@ -1219,6 +1219,28 @@ void test_standalone_confirm_cancel_and_local_insert() {
     assertSentence(a.game, {first, second});
     TEST_ASSERT_EQUAL_UINT8(2, a.game.insertPosition());
     TEST_ASSERT_TRUE(a.game.standalone());
+
+    a.game.pressEdit(now);
+    a.game.pressConfirm(now);
+    TEST_ASSERT_TRUE(a.game.confirmed());
+    a.game.pressLongConfirm(now);
+    a.game.pressConfirm(now);
+    TEST_ASSERT_FALSE(a.game.standalone());
+    TEST_ASSERT_FALSE(a.game.confirmed());
+    TEST_ASSERT_TRUE(a.game.sentence().empty());
+    TEST_ASSERT_EQUAL_UINT8(0, a.game.insertPosition());
+    TEST_ASSERT_EQUAL(WordGame::View::Picker, a.game.view());
+
+    a.game.restoreSentence(makeSentence({"remote"}, 0), true);
+    a.game.pressEdit(now);
+    a.game.pressLongConfirm(now);
+    a.game.pressConfirm(now);
+    TEST_ASSERT_TRUE(a.game.standalone());
+    TEST_ASSERT_FALSE(a.game.confirmed());
+    TEST_ASSERT_TRUE(a.game.sentence().empty());
+    TEST_ASSERT_EQUAL_UINT8(0, a.game.insertPosition());
+    TEST_ASSERT_EQUAL(WordGame::View::Sentence, a.game.view());
+    TEST_ASSERT_EQUAL(SentenceEdit::InsertCursor, a.game.editMode());
 }
 
 void test_insert_cursor_encoder_bounds_and_cancel() {

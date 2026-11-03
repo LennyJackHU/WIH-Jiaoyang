@@ -182,14 +182,15 @@ static void renderWords(const char* prev, const char* cur, const char* next,
     }
 }
 
-static void drawSentenceHeader(const char* status, uint8_t pieces,
+static void drawSentenceHeader(const char* status, uint8_t /*pieces*/,
                                uint8_t page, uint8_t pages) {
     epd.fillRect(0, 0, SCREEN_W, 29, GxEPD_BLACK);
     drawSmallLabel(status && status[0] ? status : "MY COLLAGE", 10, 18, GxEPD_WHITE);
-    char number[12];
-    if (pages > 1) snprintf(number, sizeof(number), "P%u/%u", page + 1, pages);
-    else snprintf(number, sizeof(number), "%02u", pieces);
-    drawSmallLabel(number, SCREEN_W - 10 - textWidth(nullptr, number), 18, GxEPD_WHITE);
+    if (pages > 1) {
+        char number[12];
+        snprintf(number, sizeof(number), "P%u/%u", page + 1, pages);
+        drawSmallLabel(number, SCREEN_W - 10 - textWidth(nullptr, number), 18, GxEPD_WHITE);
+    }
 }
 
 static void drawFooter(const char* first, const char* second = nullptr) {
@@ -203,7 +204,14 @@ static void drawCaret(int16_t x, int16_t y, int16_t h) {
     epd.fillRect(x, y, 3, h, GxEPD_BLACK);
 }
 
-static void drawSentenceCell(const char* word, uint8_t position, bool own,
+static void sentenceCellPosition(uint8_t slot, int16_t& x, int16_t& y) {
+    static const int8_t offsetX[6] = {-2, 2, 2, -3, -1, 1};
+    static const int8_t offsetY[6] = {0, 3, -1, 2, 2, -1};
+    x = 8 + (slot % 2) * 95 + offsetX[slot];
+    y = 37 + (slot / 2) * 42 + offsetY[slot];
+}
+
+static void drawSentenceCell(const char* word, bool own,
                              bool selected, int16_t x, int16_t y) {
     const int16_t w = 89;
     const int16_t h = 36;
@@ -211,15 +219,12 @@ static void drawSentenceCell(const char* word, uint8_t position, bool own,
     if (selected) epd.fillRect(x, y, w, h, GxEPD_BLACK);
     else epd.drawRect(x, y, w, h, GxEPD_BLACK);
 
-    char number[4];
-    snprintf(number, sizeof(number), "%02u", position + 1);
-    drawSmallLabel(number, x + 4, y + 9, foreground);
     if (own) epd.fillRect(x + w - 7, y + 4, 3, 3, foreground);
 
     if (word && word[0]) {
         char fitted[wlp2::TEXT_MAX + 4];
-        const GFXfont* font = wordFont(word, false, w - 22, fitted, sizeof(fitted));
-        if (font) drawCenteredIn(fitted, font, x + 13, y + 2, w - 17, h - 4, foreground);
+        const GFXfont* font = wordFont(word, false, w - 10, fitted, sizeof(fitted));
+        if (font) drawCenteredIn(fitted, font, x + 2, y + 2, w - 4, h - 4, foreground);
         else drawWrappedIn(fitted, x + 3, y + 10, w - 6, h - 12, foreground);
     }
 }
@@ -233,24 +238,22 @@ static void drawSentenceGrid(const Sentence& sentence, uint8_t cursor,
         anchor = insertPosition < count ? insertPosition : (count ? count - 1 : 0);
     }
     const uint8_t pageStart = sentence.empty() ? 0 : (anchor / PAGE_SIZE) * PAGE_SIZE;
-    for (uint8_t slot = 0; slot < PAGE_SIZE; ++slot) {
+    for (uint8_t slot = 0; slot < PAGE_SIZE && pageStart + slot < count; ++slot) {
         const uint8_t index = pageStart + slot;
-        const bool present = index < count;
-        const int16_t x = 8 + (slot % 2) * 95;
-        const int16_t y = 37 + (slot / 2) * 42;
-        drawSentenceCell(present ? sentence.text(index) : "", index,
-                         present && sentence.source(index)[0] == '\0',
-                         present && edit != SentenceEdit::InsertCursor && index == cursor, x, y);
+        int16_t x, y;
+        sentenceCellPosition(slot, x, y);
+        drawSentenceCell(sentence.text(index), sentence.source(index)[0] == '\0',
+                         edit != SentenceEdit::InsertCursor && index == cursor, x, y);
     }
     if (edit == SentenceEdit::InsertCursor) {
         if (count == 0) {
-            drawCaret(4, 41, 28);
+            drawCaret(10, 44, 28);
         } else {
             const bool before = insertPosition < count;
             const uint8_t index = before ? insertPosition : count - 1;
             const uint8_t slot = index - pageStart;
-            const int16_t cellX = 8 + (slot % 2) * 95;
-            const int16_t cellY = 37 + (slot / 2) * 42;
+            int16_t cellX, cellY;
+            sentenceCellPosition(slot, cellX, cellY);
             drawCaret(before ? cellX - 4 : cellX + 91, cellY + 4, 28);
         }
     }
