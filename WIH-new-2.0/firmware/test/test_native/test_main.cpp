@@ -320,9 +320,9 @@ void test_id_conflict_reassigns_persists_and_recovers() {
 
 void setUp() {}
 void tearDown() {}
-void runWebSerialTests();
 void runGameTests();
 void runProtocolFaultTests();
+void runWebSerialTests();
 
 int main() {
     UNITY_BEGIN();

@@ -172,12 +172,9 @@ void assertSentence(const WordGame& game, const std::vector<std::string>& words)
 void requestPull(WordGame& game, uint32_t now, bool after = false) {
     TEST_ASSERT_EQUAL(WordGame::View::Sentence, game.view());
     game.pressConfirm(now);
-    TEST_ASSERT_EQUAL(SentenceEdit::InsertSide, game.editMode());
-    if (after) {
-        game.pressRefresh(now);
-        TEST_ASSERT_TRUE(game.insertAfter());
-    }
-    game.pressConfirm(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::InsertCursor, game.editMode());
+    if (!after) game.turnEncoder(-1, now);
+    TEST_ASSERT_TRUE(game.requestPositionedPull(now));
     TEST_ASSERT_TRUE(game.pullPending());
 }
 
@@ -246,7 +243,8 @@ void test_left_transfer_and_node_info() {
     TEST_ASSERT_TRUE(b.game.consumeSaveRequest());
     run(a, b, now, 600);
     TEST_ASSERT_EQUAL_STRING(a.game.currentWord(), b.game.remote(Port::Left).text);
-    b.game.pressRefresh(now);
+    b.game.pressLongRefresh(now);
+    b.game.pressConfirm(now);
     TEST_ASSERT_EQUAL(WordGame::View::Picker, b.game.view());
     TEST_ASSERT_FALSE(b.game.hasSentence());
 }
@@ -405,7 +403,8 @@ void test_cancel_restore_and_no_link() {
     TEST_ASSERT_EQUAL_STRING("alpha", a.game.leftWord());
     TEST_ASSERT_EQUAL_STRING("omega", a.game.rightWord());
     TEST_ASSERT_TRUE(a.game.consumeDisplayRequest());
-    a.game.pressRefresh(now);
+    a.game.pressLongRefresh(now);
+    a.game.pressConfirm(now);
     TEST_ASSERT_FALSE(a.game.hasSentence());
     TEST_ASSERT_EQUAL(WordGame::View::Picker, a.game.view());
 }
@@ -448,7 +447,8 @@ void test_three_contributions_and_two_link_guard() {
     TEST_ASSERT_EQUAL_UINT8(2, center.game.participantCount());
     TEST_ASSERT_EQUAL_STRING(leftSent.c_str(), center.game.leftWord());
     TEST_ASSERT_EQUAL_STRING(rightSent.c_str(), center.game.rightWord());
-    center.game.pressRefresh(now);
+    center.game.pressLongRefresh(now);
+    center.game.pressConfirm(now);
     TEST_ASSERT_FALSE(center.game.hasSentence());
 }
 
@@ -592,7 +592,8 @@ void test_restored_receipt_blocks_replay_after_clear() {
     WordGame::ReceiptState receipts[8];
     uint8_t count = b.game.exportReceipts(receipts, 8);
     TEST_ASSERT_EQUAL_UINT8(1, count);
-    b.game.pressRefresh(now);
+    b.game.pressLongRefresh(now);
+    b.game.pressConfirm(now);
     TEST_ASSERT_FALSE(b.game.hasSentence());
     disconnect(a, b);
     run(a, b, now, 3500);
@@ -644,7 +645,7 @@ void test_positioned_pull_order_and_cursor_from_each_side() {
 
     std::string fromRight = b.game.currentWord();
     requestPull(a.game, now);
-    TEST_ASSERT_FALSE(a.game.insertAfter());
+    TEST_ASSERT_EQUAL_UINT8(0, a.game.insertPosition());
     run(a, b, now, 1600);
     assertSentence(a.game, {fromRight, "alpha", "omega"});
     TEST_ASSERT_EQUAL_UINT8(0, a.game.sentence().cursor());
@@ -678,18 +679,20 @@ void test_sentence_cursor_delete_confirm_cancel_and_clear() {
     a.game.turnEncoder(-1, now);
     TEST_ASSERT_EQUAL_UINT8(2, a.game.sentence().cursor());
 
-    a.game.pressConfirm(now);
+    a.game.pressRefresh(now);
     TEST_ASSERT_EQUAL(SentenceEdit::DeleteConfirm, a.game.editMode());
     a.game.pressRefresh(now);
     TEST_ASSERT_EQUAL(SentenceEdit::Navigate, a.game.editMode());
     assertSentence(a.game, {"alpha", "beta", "omega"});
     TEST_ASSERT_EQUAL_UINT8(2, a.game.sentence().cursor());
-    a.game.pressConfirm(now);
+    a.game.pressRefresh(now);
     a.game.pressConfirm(now);
     TEST_ASSERT_EQUAL(SentenceEdit::Navigate, a.game.editMode());
     assertSentence(a.game, {"alpha", "beta"});
     TEST_ASSERT_EQUAL_UINT8(1, a.game.sentence().cursor());
-    a.game.pressRefresh(now);
+    a.game.pressLongRefresh(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::ClearConfirm, a.game.editMode());
+    a.game.pressConfirm(now);
     TEST_ASSERT_EQUAL(WordGame::View::Picker, a.game.view());
     TEST_ASSERT_TRUE(a.game.sentence().empty());
 }
@@ -704,7 +707,7 @@ void test_empty_sentence_can_pull() {
     a.game.restoreSentence(makeSentence({"seed"}), false);
     disconnect(a, b);
     run(a, b, now, 3500);
-    a.game.pressConfirm(now);
+    a.game.pressRefresh(now);
     a.game.pressConfirm(now);
     TEST_ASSERT_TRUE(a.game.sentence().empty());
     TEST_ASSERT_EQUAL(WordGame::View::Sentence, a.game.view());
@@ -816,7 +819,7 @@ void test_sentence_capacity_and_position_bounds() {
     TEST_ASSERT_EQUAL_UINT32(0, b.game.receivedTransfers());
 
     b.game.restoreSentence(makeSentence(full), false);
-    b.game.pressConfirm(now);
+    TEST_ASSERT_FALSE(b.game.requestPositionedPull(now));
     TEST_ASSERT_EQUAL(SentenceEdit::Navigate, b.game.editMode());
     TEST_ASSERT_FALSE(b.game.pullPending());
     TEST_ASSERT_EQUAL(WordGame::Status::SlotBusy, b.game.status());
@@ -860,7 +863,8 @@ void test_restore_sentence_cursor_order_and_replay_tombstone() {
     TEST_ASSERT_EQUAL_STRING(a.node.identity().id, b.game.sentence().source(0));
     TEST_ASSERT_EQUAL_STRING(b.node.identity().id, b.game.sentence().source(1));
 
-    b.game.pressRefresh(now);
+    b.game.pressLongRefresh(now);
+    b.game.pressConfirm(now);
     TEST_ASSERT_FALSE(b.game.hasSentence());
     NetMessage replay = testMessage(a, b, Port::Left, "WORD_OFFER",
                                     tombstone.req, tombstone.text);
@@ -910,20 +914,20 @@ void test_insert_mode_disconnect_and_cancel_return_to_navigation() {
     run(a, b, now, 1000);
     b.game.restoreSentence(makeSentence({"alpha", "beta"}), false);
     b.game.pressConfirm(now);
-    TEST_ASSERT_EQUAL(SentenceEdit::InsertSide, b.game.editMode());
+    TEST_ASSERT_EQUAL(SentenceEdit::InsertCursor, b.game.editMode());
     disconnect(a, b);
     run(a, b, now, 3500);
+    TEST_ASSERT_EQUAL(SentenceEdit::InsertCursor, b.game.editMode());
+    b.game.pressRefresh(now);
     TEST_ASSERT_EQUAL(SentenceEdit::Navigate, b.game.editMode());
-    b.game.pressConfirm(now);
+    b.game.pressRefresh(now);
     TEST_ASSERT_EQUAL(SentenceEdit::DeleteConfirm, b.game.editMode());
     b.game.pressRefresh(now);
     TEST_ASSERT_EQUAL(SentenceEdit::Navigate, b.game.editMode());
 
     connect(a, b);
     run(a, b, now, 1000);
-    b.game.pressConfirm(now);
-    b.game.pressConfirm(now);
-    TEST_ASSERT_TRUE(b.game.pullPending());
+    requestPull(b.game, now);
     b.game.pressRefresh(now);
     TEST_ASSERT_FALSE(b.game.pullPending());
     TEST_ASSERT_EQUAL(SentenceEdit::Navigate, b.game.editMode());
@@ -938,7 +942,7 @@ void test_remote_candidate_change_requests_display() {
     run(a, b, now, 1000);
     b.game.restoreSentence(makeSentence({"alpha"}), false);
     b.game.pressConfirm(now);
-    TEST_ASSERT_EQUAL(SentenceEdit::InsertSide, b.game.editMode());
+    TEST_ASSERT_EQUAL(SentenceEdit::InsertCursor, b.game.editMode());
     while (b.game.consumeDisplayRequest()) {}
     std::string before = b.game.remote(Port::Left).text;
     a.game.pressRefresh(now);
@@ -986,7 +990,7 @@ void test_delete_last_word_keeps_empty_sentence_navigation() {
     Identity ai = identity("0000000000000001", "00000000000000a1");
     TEST_ASSERT_TRUE(a.game.begin(ai, now));
     a.game.restoreSentence(makeSentence({"alpha"}), false);
-    a.game.pressConfirm(now);
+    a.game.pressRefresh(now);
     TEST_ASSERT_EQUAL(SentenceEdit::DeleteConfirm, a.game.editMode());
     a.game.pressConfirm(now);
     TEST_ASSERT_EQUAL(SentenceEdit::Navigate, a.game.editMode());
@@ -997,6 +1001,8 @@ void test_delete_last_word_keeps_empty_sentence_navigation() {
     a.game.turnEncoder(1, now);
     a.game.turnEncoder(-1, now);
     a.game.pressConfirm(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::InsertCursor, a.game.editMode());
+    a.game.pressRefresh(now);
     TEST_ASSERT_EQUAL(SentenceEdit::Navigate, a.game.editMode());
     TEST_ASSERT_EQUAL(WordGame::View::Sentence, a.game.view());
     TEST_ASSERT_EQUAL_UINT8(0, a.game.sentence().cursor());
@@ -1064,7 +1070,8 @@ void test_pull_position_is_fixed_when_cursor_moves() {
     requestPull(a.game, now, true);
     std::string request = a.game.pendingPullRequest();
     a.game.turnEncoder(-1, now);
-    TEST_ASSERT_EQUAL_UINT8(0, a.game.sentence().cursor());
+    TEST_ASSERT_EQUAL_UINT8(1, a.game.sentence().cursor());
+    TEST_ASSERT_EQUAL_UINT8(1, a.game.insertPosition());
     TEST_ASSERT_EQUAL_STRING(request.c_str(), a.game.pendingPullRequest());
 
     run(a, b, now, 1600);
@@ -1080,7 +1087,7 @@ void test_delete_confirm_is_stable_when_link_connects() {
     uint32_t now = 0;
     beginPair(a, b, now);
     a.game.restoreSentence(makeSentence({"alpha", "beta"}, 1), false);
-    a.game.pressConfirm(now);
+    a.game.pressRefresh(now);
     TEST_ASSERT_EQUAL(SentenceEdit::DeleteConfirm, a.game.editMode());
 
     connect(a, b);
@@ -1091,10 +1098,10 @@ void test_delete_confirm_is_stable_when_link_connects() {
     a.game.pressRefresh(now);
     TEST_ASSERT_EQUAL(SentenceEdit::Navigate, a.game.editMode());
     a.game.pressConfirm(now);
-    TEST_ASSERT_EQUAL(SentenceEdit::InsertSide, a.game.editMode());
+    TEST_ASSERT_EQUAL(SentenceEdit::InsertCursor, a.game.editMode());
 }
 
-void test_second_link_exits_insert_side() {
+void test_second_link_preserves_insert_cursor_and_blocks_pull() {
     Device left(randomA);
     Device center(randomB);
     Device right(randomC);
@@ -1106,13 +1113,13 @@ void test_second_link_exits_insert_side() {
     run(left, center, right, now, 1000);
     center.game.restoreSentence(makeSentence({"alpha"}), false);
     center.game.pressConfirm(now);
-    TEST_ASSERT_EQUAL(SentenceEdit::InsertSide, center.game.editMode());
+    TEST_ASSERT_EQUAL(SentenceEdit::InsertCursor, center.game.editMode());
 
     connect(center, right);
     run(left, center, right, now, 1000);
     TEST_ASSERT_EQUAL_UINT8(2, center.node.connectedCount());
-    TEST_ASSERT_EQUAL(SentenceEdit::Navigate, center.game.editMode());
-    center.game.pressConfirm(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::InsertCursor, center.game.editMode());
+    TEST_ASSERT_FALSE(center.game.requestPositionedPull(now));
     TEST_ASSERT_EQUAL(WordGame::Status::TwoLinks, center.game.status());
     TEST_ASSERT_FALSE(center.game.pullPending());
     TEST_ASSERT_FALSE(left.game.transferPending());
@@ -1142,14 +1149,147 @@ void test_offer_and_pull_after_id_conflict_recovery() {
     TEST_ASSERT_EQUAL_UINT8(1, b.game.sentence().count());
     TEST_ASSERT_EQUAL(WordGame::View::Sentence, b.game.view());
 
-    b.game.pressConfirm(now);
-    TEST_ASSERT_EQUAL(SentenceEdit::InsertSide, b.game.editMode());
-    b.game.pressRefresh(now);
-    b.game.pressConfirm(now);
+    requestPull(b.game, now);
     TEST_ASSERT_TRUE(b.game.pullPending());
     run(a, b, now, 1600);
     TEST_ASSERT_EQUAL_UINT8(2, b.game.sentence().count());
     TEST_ASSERT_FALSE(b.game.pullPending());
+}
+
+void test_insert_cursor_positions_normal_offer_and_retry_after_exit() {
+    Device a(randomA);
+    Device b(randomB);
+    connect(a, b);
+    uint32_t now = 0;
+    beginPair(a, b, now);
+    run(a, b, now, 1000);
+    b.game.restoreSentence(makeSentence({"alpha", "omega"}), false);
+    b.game.pressConfirm(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::InsertCursor, b.game.editMode());
+    TEST_ASSERT_EQUAL_UINT8(1, b.game.insertPosition());
+    std::string offered = a.game.currentWord();
+    b.left.dropNextAccept = true;
+    a.game.pressConfirm(now);
+    a.game.pressConfirm(now);
+    run(a, b, now, 600);
+    assertSentence(b.game, {"alpha", offered, "omega"});
+    TEST_ASSERT_EQUAL(SentenceEdit::InsertCursor, b.game.editMode());
+    TEST_ASSERT_EQUAL_UINT8(2, b.game.insertPosition());
+    TEST_ASSERT_EQUAL_UINT32(1, b.game.receivedTransfers());
+
+    b.game.pressConfirm(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::Navigate, b.game.editMode());
+    run(a, b, now, 1600);
+    assertSentence(b.game, {"alpha", offered, "omega"});
+    TEST_ASSERT_EQUAL_UINT32(1, b.game.receivedTransfers());
+    TEST_ASSERT_FALSE(a.game.transferPending());
+}
+
+void test_standalone_confirm_cancel_and_local_insert() {
+    Device a(randomA);
+    uint32_t now = 0;
+    Identity ai = identity("0000000000000001", "00000000000000a1");
+    TEST_ASSERT_TRUE(a.game.begin(ai, now));
+    a.game.pressLongConfirm(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::StandaloneConfirm, a.game.editMode());
+    a.game.pressRefresh(now);
+    TEST_ASSERT_FALSE(a.game.standalone());
+    TEST_ASSERT_EQUAL(WordGame::View::Picker, a.game.view());
+
+    a.game.pressLongConfirm(now);
+    a.game.pressConfirm(now);
+    TEST_ASSERT_TRUE(a.game.standalone());
+    TEST_ASSERT_EQUAL(WordGame::View::Sentence, a.game.view());
+    TEST_ASSERT_EQUAL(SentenceEdit::InsertCursor, a.game.editMode());
+    a.game.pressEdit(now);
+    TEST_ASSERT_EQUAL(WordGame::View::Picker, a.game.view());
+    std::string first = a.game.currentWord();
+    a.game.pressConfirm(now);
+    a.game.pressConfirm(now);
+    assertSentence(a.game, {first});
+    TEST_ASSERT_EQUAL(WordGame::View::Sentence, a.game.view());
+    TEST_ASSERT_EQUAL(SentenceEdit::InsertCursor, a.game.editMode());
+    TEST_ASSERT_EQUAL_UINT8(1, a.game.insertPosition());
+    TEST_ASSERT_STR_NE(first.c_str(), a.game.currentWord());
+
+    a.game.pressEdit(now);
+    std::string second = a.game.currentWord();
+    a.game.pressConfirm(now);
+    a.game.pressConfirm(now);
+    assertSentence(a.game, {first, second});
+    TEST_ASSERT_EQUAL_UINT8(2, a.game.insertPosition());
+    TEST_ASSERT_TRUE(a.game.standalone());
+
+    a.game.pressEdit(now);
+    a.game.pressConfirm(now);
+    TEST_ASSERT_TRUE(a.game.confirmed());
+    a.game.pressLongConfirm(now);
+    a.game.pressConfirm(now);
+    TEST_ASSERT_FALSE(a.game.standalone());
+    TEST_ASSERT_FALSE(a.game.confirmed());
+    TEST_ASSERT_TRUE(a.game.sentence().empty());
+    TEST_ASSERT_EQUAL_UINT8(0, a.game.insertPosition());
+    TEST_ASSERT_EQUAL(WordGame::View::Picker, a.game.view());
+
+    a.game.restoreSentence(makeSentence({"remote"}, 0), true);
+    a.game.pressEdit(now);
+    a.game.pressLongConfirm(now);
+    a.game.pressConfirm(now);
+    TEST_ASSERT_TRUE(a.game.standalone());
+    TEST_ASSERT_FALSE(a.game.confirmed());
+    TEST_ASSERT_TRUE(a.game.sentence().empty());
+    TEST_ASSERT_EQUAL_UINT8(0, a.game.insertPosition());
+    TEST_ASSERT_EQUAL(WordGame::View::Sentence, a.game.view());
+    TEST_ASSERT_EQUAL(SentenceEdit::InsertCursor, a.game.editMode());
+}
+
+void test_insert_cursor_encoder_bounds_and_cancel() {
+    Device a(randomA);
+    uint32_t now = 0;
+    Identity ai = identity("0000000000000001", "00000000000000a1");
+    TEST_ASSERT_TRUE(a.game.begin(ai, now));
+    a.game.restoreSentence(makeSentence({"alpha", "omega"}, 1), false);
+    a.game.pressConfirm(now);
+    TEST_ASSERT_EQUAL_UINT8(2, a.game.insertPosition());
+    a.game.turnEncoder(1, now);
+    TEST_ASSERT_EQUAL_UINT8(2, a.game.insertPosition());
+    a.game.turnEncoder(-5, now);
+    TEST_ASSERT_EQUAL_UINT8(0, a.game.insertPosition());
+    a.game.turnEncoder(-1, now);
+    TEST_ASSERT_EQUAL_UINT8(0, a.game.insertPosition());
+    a.game.pressConfirm(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::Navigate, a.game.editMode());
+    a.game.pressConfirm(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::InsertCursor, a.game.editMode());
+    a.game.pressRefresh(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::Navigate, a.game.editMode());
+    assertSentence(a.game, {"alpha", "omega"});
+}
+
+void test_upload_and_clear_confirmation_cancel_paths() {
+    Device a(randomA);
+    uint32_t now = 0;
+    Identity ai = identity("0000000000000001", "00000000000000a1");
+    TEST_ASSERT_TRUE(a.game.begin(ai, now));
+    a.game.restoreSentence(makeSentence({"alpha", "omega"}), false);
+    a.game.pressLongConfirm(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::UploadConfirm, a.game.editMode());
+    a.game.pressRefresh(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::Navigate, a.game.editMode());
+    TEST_ASSERT_FALSE(a.game.consumeUploadRequest());
+    a.game.pressLongConfirm(now);
+    a.game.pressConfirm(now);
+    TEST_ASSERT_TRUE(a.game.consumeUploadRequest());
+    TEST_ASSERT_FALSE(a.game.consumeUploadRequest());
+
+    a.game.pressLongRefresh(now);
+    TEST_ASSERT_EQUAL(SentenceEdit::ClearConfirm, a.game.editMode());
+    a.game.pressRefresh(now);
+    assertSentence(a.game, {"alpha", "omega"});
+    a.game.pressLongRefresh(now);
+    a.game.pressConfirm(now);
+    TEST_ASSERT_TRUE(a.game.sentence().empty());
+    TEST_ASSERT_EQUAL(WordGame::View::Picker, a.game.view());
 }
 
 } // namespace
@@ -1187,6 +1327,10 @@ void runGameTests() {
     RUN_TEST(test_cancelled_pull_does_not_retry);
     RUN_TEST(test_pull_position_is_fixed_when_cursor_moves);
     RUN_TEST(test_delete_confirm_is_stable_when_link_connects);
-    RUN_TEST(test_second_link_exits_insert_side);
+    RUN_TEST(test_second_link_preserves_insert_cursor_and_blocks_pull);
     RUN_TEST(test_offer_and_pull_after_id_conflict_recovery);
+    RUN_TEST(test_insert_cursor_positions_normal_offer_and_retry_after_exit);
+    RUN_TEST(test_standalone_confirm_cancel_and_local_insert);
+    RUN_TEST(test_insert_cursor_encoder_bounds_and_cancel);
+    RUN_TEST(test_upload_and_clear_confirmation_cancel_paths);
 }

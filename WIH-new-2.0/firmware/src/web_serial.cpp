@@ -9,6 +9,7 @@ void WebSerialEvents::begin(const char* device, const char* session, uint32_t no
     memcpy(device_, device, sizeof(device_));
     memcpy(session_, session, sizeof(session_));
     sending_ = false;
+    uploading_ = false;
     sequence_ = 0;
     commandLength_ = 0;
     discardCommand_ = false;
@@ -18,12 +19,11 @@ void WebSerialEvents::begin(const char* device, const char* session, uint32_t no
 
 void WebSerialEvents::tick(uint32_t now) {
     if (started_ && sending_) {
-        emitSnapshot(); // At most one bounded frame per service call.
+        emitSnapshot();
         return;
     }
     if (!started_ || now - lastReadyMs_ < 2000) return;
     lastReadyMs_ = now;
-    // Allows a page opened long after boot to identify the firmware.
     emitReady();
 }
 
@@ -58,11 +58,7 @@ void WebSerialEvents::receive(char byte, const WordGame& game) {
                 strcmp(type, "get_sentence") == 0 &&
                 json.getString("request", request, sizeof(request)) &&
                 wlp2::validHex(request, 16)) {
-                // A new request supersedes an old, unfinished export.
-                snapshot_ = game.sentence();
-                memcpy(request_, request, sizeof(request_));
-                snapshotStep_ = 0;
-                sending_ = true;
+                beginSnapshot(game, request, false);
             }
         }
         commandLength_ = 0;
@@ -73,13 +69,34 @@ void WebSerialEvents::receive(char byte, const WordGame& game) {
     }
 }
 
+bool WebSerialEvents::beginSnapshot(const WordGame& game, const char* request, bool upload) {
+    snapshot_ = game.sentence();
+    memcpy(request_, request, sizeof(request_));
+    snapshotStep_ = 0;
+    sending_ = true;
+    uploading_ = upload;
+    return true;
+}
+
+bool WebSerialEvents::uploadSentence(const WordGame& game) {
+    if (!started_ || sending_ || !game.hasSentence()) return false;
+    char request[17];
+    snprintf(request, sizeof(request), "%08lx%08lx",
+             static_cast<unsigned long>(sequence_ + 1),
+             static_cast<unsigned long>(sequence_ + 1));
+    return beginSnapshot(game, request, true);
+}
+
 bool WebSerialEvents::emitSnapshot() {
     memcpy(frame_, "WIH:", 4);
     wlp2::JsonWriter json(frame_ + 4, sizeof(frame_) - 5);
     const bool begin = snapshotStep_ == 0;
     const bool end = snapshotStep_ == snapshot_.count() + 1;
+    const char* type;
+    if (uploading_) type = begin ? "upload_begin" : end ? "upload_end" : "upload_word";
+    else type = begin ? "sentence_begin" : end ? "sentence_end" : "sentence_word";
     json.beginObject();
-    json.fieldString("type", begin ? "sentence_begin" : end ? "sentence_end" : "sentence_word");
+    json.fieldString("type", type);
     json.fieldUInt("protocol", 1);
     json.fieldString("device", device_);
     json.fieldString("session", session_);
@@ -95,13 +112,16 @@ bool WebSerialEvents::emitSnapshot() {
     frame_[length] = '\n';
     if (canWrite_ && !canWrite_(length + 1)) return false;
     write_(frame_, length + 1);
-    if (end) sending_ = false;
-    else ++snapshotStep_;
+    if (end) {
+        sending_ = false;
+        uploading_ = false;
+    } else {
+        ++snapshotStep_;
+    }
     return true;
 }
 
 void WebSerialEvents::observeConfirm(const WordGame& game, bool wasPicker, bool wasConfirmed) {
-    // Observe the existing handler; never call a gameplay action from this module.
     if (wasPicker && !wasConfirmed && game.view() == WordGame::View::Picker && game.confirmed())
         emitConfirmed(game.currentWord());
 }

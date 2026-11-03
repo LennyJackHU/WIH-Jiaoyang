@@ -176,9 +176,9 @@ wlp2: reassigned id=<新节点ID> saved=1
 4. 接收方句子最多 12 词；满句或接收记录暂时不可用时返回 BUSY，发送方保留同一 req 重试。
 5. WORD_OFFER/PULL 只允许直接邻居，三块短链拓扑不能隔块传词。
 6. 接收方自己的 Picker 当前词不会自动入句；只有有效来词才进入 Sentence。
-7. 已连接时 Navigate 的 A 进入 InsertSide，不是删除。要删除可先断开连接，再 A→A；DeleteConfirm 的 B 只取消。
+7. Navigate 的 A 进入竖线插入模式；短 B 才是删除当前词确认。InsertCursor 的 B 只取消插入模式。
 
-定位 pull 的 BEFORE/AFTER 只由 cursor 和 `pos` 决定，不由物理 L/R 决定。发送方只有收到 ACCEPT 后才换候选词。
+插入模式下普通来词落在竖线处；Navigate 下才按物理 L/R 落到句首/句尾。带 `pos` 的消息始终按指定位置插入。发送方只有收到 ACCEPT 后才换候选词。
 
 ## 7. 面板、NV Save 与“看起来像死机”
 
@@ -196,8 +196,8 @@ wlp2: reassigned id=<新节点ID> saved=1
 
 ### 重启后 ID 或句子状态不符合预期
 
-- 节点 ID 与 WIH4 句子状态分开保存：`wih/node_id` 对 `wih/state`。
-- 句子、cursor、来源和 receipts 可从 NVS 恢复。
+- 节点 ID 与 WIH5 句子状态分开保存：`wih/node_id` 对 `wih/state`。
+- 句子、选择 cursor、竖线位置、单机标记、来源和 receipts 可从 NVS 恢复。
 - offer/pull/DONE pending 不保证断电续传；运行中断线重试与断电恢复是不同边界。
 
 ## 8. 一次完整验收要收集什么
@@ -219,9 +219,9 @@ wlp2: reassigned id=<新节点ID> saved=1
 
 ```sh
 pio test -e native
-python3 -m unittest simulator.test_simulator -v
+node --test WIH-new-2.0/web/tests/serial-bridge.test.mjs
 ```
 
-当前 49 项 native 测试覆盖开放加入、同设备重启、ID 冲突换号及恢复后 OFFER/PULL；14 项 Web 测试覆盖模拟器模型与 HTTP 操作。它们不能证明真实 Pogo、电气安全、NVS 实板写入或面板行为。
+当前 60 项 native 测试覆盖开放加入、故障恢复、句子交互、单机、竖线定位和 UART 上传；网页 Node 测试覆盖串口事件与完整上传序列。它们不能证明真实 Pogo、电气安全、NVS 实板写入或面板行为。
 
 按 [双板 SOP](hardware-sop.md) 继续执行 N8R8 构建、烧录、超过 10 秒持续监听、双方 links=1、即时 OFFER 和 Sentence 验收。只有这些证据齐全后，才应更新 PR 或 merge。

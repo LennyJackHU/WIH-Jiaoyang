@@ -31,6 +31,21 @@ struct LegacyPersistStateV2 {
     char rightWord[wlp2::TEXT_MAX + 1];
 };
 
+struct LegacyPersistStateV4 {
+    uint32_t magic;
+    int16_t hist[HISTORY_LEN];
+    uint8_t first;
+    uint8_t cur;
+    uint8_t last;
+    uint8_t confirmed;
+    uint8_t sentenceCount;
+    uint8_t sentenceCursor;
+    char sentenceWords[Sentence::MAX_WORDS][wlp2::TEXT_MAX + 1];
+    char sentenceSources[Sentence::MAX_WORDS][17];
+    uint8_t receiptCount;
+    WordGame::ReceiptState receipts[8];
+};
+
 struct LegacyPersistStateV3 {
     uint32_t magic;
     int16_t hist[HISTORY_LEN];
@@ -51,6 +66,7 @@ static_assert(sizeof(LegacyPersistStateV2) == 268, "WIH2 layout changed");
 static const uint32_t LEGACY_STATE_MAGIC_V1 = 0x57494831u;
 static const uint32_t LEGACY_STATE_MAGIC_V2 = 0x57494832u;
 static const uint32_t LEGACY_STATE_MAGIC_V3 = 0x57494833u;
+static const uint32_t LEGACY_STATE_MAGIC_V4 = 0x57494834u;
 
 static void migratePicker(PersistState& out, uint32_t magic, const int16_t* hist,
                           uint8_t first, uint8_t cur, uint8_t last, uint8_t confirmed) {
@@ -74,6 +90,15 @@ bool storageLoadNvs(PersistState& out) {
     if (len == sizeof(PersistState)) {
         ok = prefs.getBytes("state", &out, sizeof(PersistState)) == len &&
              out.magic == STATE_MAGIC;
+    } else if (len == sizeof(LegacyPersistStateV4)) {
+        LegacyPersistStateV4 legacy;
+        if (prefs.getBytes("state", &legacy, sizeof(legacy)) == len &&
+            legacy.magic == LEGACY_STATE_MAGIC_V4) {
+            out = PersistState();
+            memcpy(&out, &legacy, sizeof(legacy));
+            out.magic = STATE_MAGIC;
+            ok = true;
+        }
     } else if (len == sizeof(LegacyPersistStateV3)) {
         LegacyPersistStateV3 legacy;
         if (prefs.getBytes("state", &legacy, sizeof(legacy)) == len &&

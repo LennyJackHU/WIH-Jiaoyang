@@ -58,7 +58,7 @@ HELLO 和 HELLO_ACK 使用协议版本 `v=3`，携带 `id/boot/nonce/kit/fp/port
 
 ## 6. 测试
 
-`pio test -e native` 当前共 49 项，新增覆盖：
+`pio test -e native` 当前共 60 项，其中开放加入相关覆盖：
 
 - `test_unlisted_modules_join`：未登记 ID 的陌生模块直接加入。
 - `test_same_device_restart_keeps_id`：同设备换 boot 不换号、不触发持久化回调。

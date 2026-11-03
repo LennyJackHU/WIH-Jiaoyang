@@ -61,17 +61,18 @@ DevKitC PCB 版本仍要区分：RGB LED 在 **v1.1 是 GPIO38、v1.0 是 GPIO48
 
 必须实测单侧掉电倒灌、慢/快电源斜坡、`/OE` 波形、单线断开、接触抖动和触点 ESD。通过这些之前只能说“协议支持重连”，不能说“电气上支持安全热插拔”。官方器件依据包括 ESP32-S3/DevKitC-1 数据手册、ESP32 硬件设计指南和 TI SN74LVC2G125 数据手册；社区 UART 倒灌案例仅作风险旁证。
 
-## 交互逻辑（V2.0 约定）
+## 交互逻辑
 
-- **Picker**：编码器双向无终点选词，相邻词不重复。A 第一次确认、第二次向唯一直接邻居主动 offer；无邻居或有两个邻居时只提示。B 刷新、取消确认或取消本机 pending。
-- **Sentence / Navigate**：任何收词都进入句子页，句子最多 12 个有序词。无连接时编码器循环高亮，A 弹出 `delete? y/n`，再 A 删除、B 取消；Navigate 的 B 清句回 Picker。删到空句仍留 Sentence。
-- **Sentence / InsertSide**：唯一有效邻居下 A 进入并显示 remote candidate，B 切换 `L BEFORE` / `R AFTER`，A 发 WORD_PULL 按 cursor 前/后位置拉取；空句也可拉取。
-- **物理左右与句内位置**：定位 pull 只由 `pos` 决定，UART L/R 不再决定插入位置。只有无 `pos` 的主动 offer 按接收入边默认 Left 到句首、Right 到句尾；换向重连不搬动已插入的词。
-- **完成与重试**：接收方即句子块；发送方收到应用层 ACCEPT 后才重新随机。OFFER/PULL/ACCEPT 丢失或运行中断线时保留 req 重试且不重复插入；已收句子不因拔线消失。B 取消本机 pending 不会远程撤销对端已入句内容。
-- **持久化边界**：WIH4 保存句子顺序、cursor、来源和 receipts；编辑模式与 offer/pull pending 不保证跨断电恢复，断线重试不等于断电续传。
-- **刷新与持续监听**：滚动使用全屏范围的快速局刷，确认/取消只刷新中央 200×62 区域；句子与通信状态变化使用整屏区域。每 20 次局部刷新自动全刷一次；无操作约 5 秒后只让墨水屏 hibernate，MCU 不深睡，UART、握手、`game.tick()` 和重试持续运行。
+- **Picker**：编码器双向无终点选词，相邻词不重复。A 第一次选中、第二次向唯一直接邻居 offer；B 在未选中时 shuffle、已选中时取消。长按 A 弹单机模式确认。
+- **Sentence / Navigate**：下划线标记选择 cursor。A 进入竖线插入模式；短 B 弹删除当前词确认，长 B 弹清句确认。
+- **Sentence / InsertCursor**：竖线表示插入位置，编码器在句首、词间和句尾移动。A 返回选择模式，B 取消插入模式。
+- **物理左右与句内位置**：选择模式下无 `pos` offer 按 Left 到句首、Right 到句尾；插入模式下无 `pos` offer 落在竖线处。带 `pos` 的消息始终按指定位置插入，换向重连不搬动已插入的词。
+- **单机和上传**：单机 Picker 第二次 A 插入本机当前词。非空 Sentence 长按 A 经确认后通过 UART0 上传冻结整句；所有确认页 A 确认、B 取消。
+- **完成与重试**：发送方收到应用层 ACCEPT 后才重新随机。运行中断线保留 req 重试且不重复插入；B 取消本机 pending 不远程撤销对端内容。
+- **持久化边界**：WIH5 保存句子顺序、选择 cursor、竖线位置、单机标记、来源和 receipts；确认页与 offer/pull pending 不保证跨断电恢复。
+- **刷新与持续监听**：滚动使用快速局刷，每 20 次局刷自动全刷一次；无操作约 5 秒后只让墨水屏 hibernate，MCU 不深睡，UART、`game.tick()` 和重试持续运行。
 
-完整模式切换、按键上下文、双机例子和协议时序见 [句子编辑器说明](sentence-editor.md)。
+完整模式切换、按键上下文、上传格式和协议时序见 [句子编辑器说明](sentence-editor.md)。
 
 ## 按钮（开机自动识别每个引脚的触发极性）
 
@@ -79,8 +80,8 @@ DevKitC PCB 版本仍要区分：RGB LED 在 **v1.1 是 GPIO38、v1.0 是 GPIO48
 
 | 按钮 | DevKitC-1 | GPIO | 功能 |
 |---|---|---|---|
-| A | 7 | GPIO7 | Picker 确认/再次按下 offer；Sentence 删除确认或进入/发起定位 pull |
-| B | 8 | GPIO8 | Picker 刷新/取消；DeleteConfirm 取消删除；InsertSide 切换 BEFORE/AFTER；Navigate 清句；pending 时优先取消本机请求 |
+| A | 7 | GPIO7 | Picker 选中/发送或本机入句，长按单机确认；Sentence 切换选择/竖线模式，长按上传确认；确认页确认 |
+| B | 8 | GPIO8 | Picker shuffle/取消；Sentence 短按删除确认、长按清句确认、插入模式取消；确认页取消；pending 时优先取消本机请求 |
 
 只有屏幕+单按钮的板子：按钮接 GPIO7 即可，GPIO8 留空。
 

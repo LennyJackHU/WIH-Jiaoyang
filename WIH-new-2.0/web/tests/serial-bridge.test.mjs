@@ -461,3 +461,25 @@ test('write failure releases writable lock and clears pending request', async ()
     assert.equal(writable.locked, false);
   } finally { await f.bridge.disconnect(); }
 });
+
+
+test('module-initiated upload commits only a complete ordered sequence', async () => {
+  const f = await sentenceFixture();
+  const uploaded = [];
+  f.bridge.onSentence = words => uploaded.push(words);
+  try {
+    const request = '0123456789abcdef';
+    const event = (type, extra = {}) => f.port.send(line({
+      ...identity, type, request, count: 2, ...extra
+    }));
+    event('upload_begin');
+    event('upload_word', { index: 0, word: 'hello' });
+    event('upload_end');
+    await settle();
+    assert.deepEqual(uploaded, []);
+    event('upload_word', { index: 1, word: 'world' });
+    event('upload_end');
+    await settle();
+    assert.deepEqual(uploaded, [['hello', 'world']]);
+  } finally { await f.bridge.disconnect(); }
+});

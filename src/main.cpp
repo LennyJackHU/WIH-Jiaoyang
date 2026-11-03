@@ -7,6 +7,7 @@
 #include "storage.h"
 #include "wlp2_arduino.h"
 #include "word_game.h"
+#include "web_serial.h"
 
 static wlp2::Handler initialHandler;
 static UartBytePort leftUart(Serial1);
@@ -17,6 +18,23 @@ static void nodeIdChanged(const char* id) {
 }
 static wlp2::Node node(&leftUart, &rightUart, initialHandler, esp_random, nodeIdChanged);
 static WordGame game(node, esp_random, esp_random);
+static void writeWebEvent(const char* data, size_t length) {
+    Serial.write(reinterpret_cast<const uint8_t*>(data), length);
+}
+static bool canWriteWebEvent(size_t length) {
+    return Serial.availableForWrite() >= static_cast<int>(length);
+}
+static WebSerialEvents webSerial(writeWebEvent, canWriteWebEvent);
+static void serviceWebSerial(uint32_t now) {
+    for (unsigned i = 0; i < 64 && Serial.available(); ++i)
+        webSerial.receive(static_cast<char>(Serial.read()), game);
+    if (game.consumeUploadRequest()) {
+        bool started = webSerial.uploadSentence(game);
+        game.reportUpload(started);
+        Serial.printf("web: upload started=%d\n", started);
+    }
+    webSerial.tick(now);
+}
 static bool protocolReady = false;
 static bool dirty = false;
 static DisplayArea dirtyArea = DisplayArea::Full;
@@ -44,11 +62,14 @@ static void fillState(PersistState& s) {
         snprintf(s.sentenceSources[i], sizeof(s.sentenceSources[i]), "%s", sentence.source(i));
     }
     s.receiptCount = game.exportReceipts(s.receipts, 8);
+    s.standalone = game.standalone() ? 1 : 0;
+    s.insertPosition = game.insertPosition();
 }
 
 static bool applyState(const PersistState& s) {
     if (s.magic != STATE_MAGIC || s.first >= HISTORY_LEN || s.cur >= HISTORY_LEN ||
         s.last >= HISTORY_LEN || s.confirmed > 1 || s.receiptCount > 8 ||
+        s.standalone > 1 || s.insertPosition > s.sentenceCount ||
         s.sentenceCount > Sentence::MAX_WORDS ||
         (s.sentenceCount == 0 && s.sentenceCursor != 0) ||
         (s.sentenceCount > 0 && s.sentenceCursor >= s.sentenceCount)) return false;
@@ -83,7 +104,8 @@ static bool applyState(const PersistState& s) {
     picker.first = s.first;
     picker.cur = s.cur;
     picker.last = s.last;
-    game.restoreSentence(sentence, s.confirmed != 0, s.receipts, s.receiptCount);
+    game.restoreSentence(sentence, s.confirmed != 0, s.receipts, s.receiptCount,
+                         s.standalone != 0, s.insertPosition);
     return true;
 }
 
@@ -108,6 +130,7 @@ static void handleButtons(uint32_t now) {
         bool wasSentence = game.view() == WordGame::View::Sentence;
         WordGame::Status oldStatus = game.status();
         game.pressConfirm(now);
+        webSerial.observeConfirm(game, !wasSentence, wasConfirmed);
         game.consumeDisplayRequest();
         bool centerOnly = !wasConfirmed && game.confirmed() && !wasSentence &&
                           oldStatus == WordGame::Status::None &&
@@ -137,12 +160,19 @@ static void handleButtons(uint32_t now) {
                       game.view() == WordGame::View::Sentence ? "sentence" : "picker");
         lastActivityMs = now;
         break;
-    case BtnEvent::CLEAR:
-        game.pressClear(now);
+    case BtnEvent::LONG_CONFIRM:
+        game.pressLongConfirm(now);
         game.consumeDisplayRequest();
         markDirty(DisplayArea::Full);
-        Serial.printf("button CLEAR: mode=%d view=%s\n", static_cast<int>(game.editMode()),
+        Serial.printf("button HOLD A: mode=%d view=%s\n", static_cast<int>(game.editMode()),
                       game.view() == WordGame::View::Sentence ? "sentence" : "picker");
+        lastActivityMs = now;
+        break;
+    case BtnEvent::LONG_REFRESH:
+        game.pressLongRefresh(now);
+        game.consumeDisplayRequest();
+        markDirty(DisplayArea::Full);
+        Serial.printf("button HOLD B: mode=%d\n", static_cast<int>(game.editMode()));
         lastActivityMs = now;
         break;
     default:
@@ -157,6 +187,7 @@ static void serviceProtocolDuringDisplay(const void*) {
     if (now - lastPumpMs >= 5) {
         lastPumpMs = now;
         game.tick(now);
+        serviceWebSerial(now);
         handleButtons(now);
     }
 }
@@ -176,22 +207,17 @@ static void draw(bool partial) {
         forceFullRefresh = false;
     }
     uint32_t drawStartMs = millis();
-    const char* status = protocolReady ? game.statusText() : "SET KIT / MEMBER IDS";
+    const char* status = protocolReady ? game.statusText() : "WIH NOT READY";
     Serial.printf("draw: full=%d view=%s cur=%s\n", full,
                   game.view() == WordGame::View::Sentence ? "sentence" : "picker",
                   game.currentWord());
     if (game.view() == WordGame::View::Sentence) {
-        const char* candidate = "";
-        if (node.connectedCount() == 1) {
-            wlp2::Port port = node.link(wlp2::Port::Left).up() ? wlp2::Port::Left : wlp2::Port::Right;
-            const WordGame::RemoteSnapshot& remote = game.remote(port);
-            if (remote.valid && remote.orderValid) candidate = remote.text;
-        }
         displayDrawSentence(game.sentence(), game.sentence().cursor(), game.editMode(),
-                            game.insertAfter(), candidate, status, !full);
+                            game.insertPosition(), status, !full);
     } else {
         displayDrawWords(game.picker().prevWord(), game.currentWord(), game.picker().nextWord(),
-                         game.confirmed(), !full, requestedArea, status);
+                         game.confirmed(), !full, requestedArea, status, game.standalone(),
+                         game.editMode() == SentenceEdit::StandaloneConfirm);
     }
     Serial.printf("draw: done full=%d area=%s elapsed=%lums\n", full,
                   requestedArea == DisplayArea::Center ? "center" : "screen",
@@ -243,6 +269,7 @@ static void hibernateDisplayWhenIdle() {
 }
 
 void setup() {
+    Serial.setTxBufferSize(2048);
     Serial.begin(115200);
     neopixelWrite(PIN_RGB_LED, 0, 0, 0);
     uint32_t t0 = millis();
@@ -254,6 +281,7 @@ void setup() {
     wlp2::Identity identity;
     wlp2MakeIdentity(identity);
     bool identityReady = game.begin(identity, millis());
+    webSerial.begin(identity.fingerprint, identity.boot, millis());
     protocolReady = uartReady && identityReady;
     Serial.printf("wlp2: configured=%d uart=%d identity=%d id=%s links=%u\n",
                   protocolReady, uartReady, identityReady, identity.id, node.connectedCount());
@@ -289,6 +317,7 @@ void setup() {
 void loop() {
     uint32_t now = millis();
     game.tick(now);
+    serviceWebSerial(now);
     if (game.consumeDisplayRequest()) {
         markDirty(DisplayArea::Full);
         lastActivityMs = now;
