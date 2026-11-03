@@ -9,12 +9,84 @@ DST_H = "src/words.h"
 DST_CPP = "src/words.cpp"
 MAX_WORDS = 2000
 MAX_LEN = 96  # wlp2::TEXT_MAX
+MAX_DISPLAY_LEN = 24
+MAX_DISPLAY_WORDS = 4
+
+# Shorten only the most unwieldy phrases while preserving their central image.
+REFINEMENTS = {
+    "and the rest is rust": "rest is rust",
+    "a necklace of streetlights": "streetlight necklace",
+    "you left the light on": "light left on",
+    "a string of small hours": "small hours",
+    "ink dries slower than hope": "hope dries slowly",
+    "the wind changed its mind": "wind changed course",
+    "you had to be there": "had to be there",
+    "the rain checked out early": "rain checked out",
+    "the weekend is a myth": "weekend myth",
+    "when the lights go out": "lights go out",
+    "I read between the rain": "between the rain",
+    "autumn smells like apples": "autumn apple scent",
+    "the sky is the limit": "sky's the limit",
+    "streetlights blinked first": "streetlights blinked",
+    "when the tide comes in": "tide comes in",
+    "distance means so little": "distance means little",
+    "because the light changed": "the light changed",
+    "the road is a sentence": "road as sentence",
+    "a drop in the ocean": "ocean drop",
+    "you complete the circuit": "complete the circuit",
+    "the pigeons run this town": "pigeons rule",
+    "while the moon is full": "moon is full",
+    "the anatomy of a hug": "hug anatomy",
+    "as far as I know": "as far as known",
+    "the dark is just a room": "just a room",
+    "a slip of the tongue": "tongue slip",
+    "may I have this dance": "have this dance",
+    "the ghost of a chance": "ghost chance",
+    "winter is a long letter": "winter's long letter",
+    "the door was already open": "door already open",
+    "a sequel to the rain": "sequel to rain",
+    "the garden keeps secrets": "garden keeps secrets",
+    "as a matter of fact": "matter of fact",
+    "the margin is a home": "margin is home",
+    "the horizon keeps moving": "horizon keeps moving",
+    "the last of the light": "last of light",
+    "the moon follows me home": "moon follows me",
+    "the elevator skips thirteen": "elevator skips thirteen",
+    "we ran out of road": "out of road",
+    "the echo of an echo": "echo of echo",
+    "the fog took the train": "fog took the train",
+    "the bottom of the cup": "bottom of cup",
+    "the past is a draft": "past draft",
+    "the tip of the iceberg": "tip of iceberg",
+    "if your eyes could speak": "eyes could speak",
+    "until the ink runs dry": "ink runs dry",
+    "the snow remembers nothing": "snow remembers nothing",
+    "as luck would have it": "luck would have it",
+    "until the cows come home": "cows come home",
+    "dusk is a slow song": "dusk's slow song",
+    "I saved you a seat": "saved you a seat",
+    "the ink is still wet": "ink still wet",
+    "the subway swallows songs": "subway swallows songs",
+    "the map is not the place": "map isn't territory",
+    "the dictionary is lonely": "dictionary is lonely",
+    "the point of no return": "point of no return",
+    "poetry is a contact sport": "poetry contact sport",
+    "my heart beats different": "heart beats different",
+    "I wrote you a river": "wrote you a river",
+    "the end of the line": "end of line",
+    "while the iron is hot": "iron is hot",
+    "concentrate and ask again": "concentrate, ask again",
+    "souls don't do accidents": "souls dodge accidents",
+}
 
 words = []
 seen = set()
 with open(SRC, encoding="utf-8") as f:
     for line in f:
         w = " ".join(line.strip().split())
+        w = REFINEMENTS.get(w, w)
+        if len(w) > MAX_DISPLAY_LEN or len(w.split()) > MAX_DISPLAY_WORDS:
+            continue
         if not re.fullmatch(r"[ -~]+", w):
             continue
         if not (1 <= len(w.encode("ascii")) <= MAX_LEN):
